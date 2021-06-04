@@ -282,3 +282,12 @@ CERT_DIRS := receiver/sapmreceiver/testdata \
 .PHONY: certs
 certs:
 	$(foreach dir, $(CERT_DIRS), $(call exec-command, @internal/buildscripts/gen-certs.sh -o $(dir)))
+
+.PHONY: deployment
+deployment:
+	kubectl apply -f deploy/
+
+.PHONY: update-from-upstream
+update-from-upstream:
+	git fetch upstream
+	git rebase upstream/master
