@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinylib/msgp/msgp"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -152,7 +152,7 @@ func TestForwardEvent(t *testing.T) {
 	require.EqualValues(t, Logs(
 		Log{
 			Timestamp: 1593032377776693638,
-			Body:      pdata.NewAttributeValueNull(),
+			Body:      pdata.NewAttributeValueEmpty(),
 			Attributes: map[string]pdata.AttributeValue{
 				"Mem.free":   pdata.NewAttributeValueInt(848908),
 				"Mem.total":  pdata.NewAttributeValueInt(7155496),
@@ -165,7 +165,7 @@ func TestForwardEvent(t *testing.T) {
 		},
 		Log{
 			Timestamp: 1593032378756829346,
-			Body:      pdata.NewAttributeValueNull(),
+			Body:      pdata.NewAttributeValueEmpty(),
 			Attributes: map[string]pdata.AttributeValue{
 				"Mem.free":   pdata.NewAttributeValueInt(848908),
 				"Mem.total":  pdata.NewAttributeValueInt(7155496),

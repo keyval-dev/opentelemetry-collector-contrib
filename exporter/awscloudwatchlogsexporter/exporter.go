@@ -26,7 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +59,7 @@ func (e *exporter) Start(ctx context.Context, host component.Host) error {
 		}
 		e.client = cloudwatchlogs.New(sess)
 
-		e.logger.Debug("Retrieving Cloud Watch sequence token")
+		e.logger.Debug("Retrieving CloudWatch sequence token")
 		out, err := e.client.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
 			LogGroupName:        aws.String(e.config.LogGroupName),
 			LogStreamNamePrefix: aws.String(e.config.LogStreamName),
@@ -73,6 +73,10 @@ func (e *exporter) Start(ctx context.Context, host component.Host) error {
 			return
 		}
 		stream := out.LogStreams[0]
+		if stream.UploadSequenceToken == nil {
+			e.logger.Debug("CloudWatch sequence token is nil, will assume empty")
+			return
+		}
 		e.seqToken = *stream.UploadSequenceToken
 	})
 	return startErr
@@ -83,15 +87,15 @@ func (e *exporter) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (e *exporter) PushLogs(ctx context.Context, ld pdata.Logs) (droppedTimeSeries int, err error) {
+func (e *exporter) PushLogs(ctx context.Context, ld pdata.Logs) (err error) {
 	// TODO(jbd): Relax this once CW Logs support ingest
 	// without sequence tokens.
 	e.seqTokenMu.Lock()
 	defer e.seqTokenMu.Unlock()
 
-	logEvents, dropped := logsToCWLogs(e.logger, ld)
+	logEvents, _ := logsToCWLogs(e.logger, ld)
 	if len(logEvents) == 0 {
-		return 0, nil
+		return nil
 	}
 
 	e.logger.Debug("Putting log events", zap.Int("num_of_events", len(logEvents)))
@@ -99,19 +103,24 @@ func (e *exporter) PushLogs(ctx context.Context, ld pdata.Logs) (droppedTimeSeri
 		LogGroupName:  aws.String(e.config.LogGroupName),
 		LogStreamName: aws.String(e.config.LogStreamName),
 		LogEvents:     logEvents,
-		SequenceToken: aws.String(e.seqToken),
 	}
+	if e.seqToken != "" {
+		input.SequenceToken = aws.String(e.seqToken)
+	} else {
+		e.logger.Debug("Putting log events without a sequence token")
+	}
+
 	out, err := e.client.PutLogEvents(input)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if info := out.RejectedLogEventsInfo; info != nil {
-		return ld.LogRecordCount() + dropped, fmt.Errorf("log event rejected")
+		return fmt.Errorf("log event rejected: %s", info.String())
 	}
 	e.logger.Debug("Log events are successfully put")
 
 	e.seqToken = *out.NextSequenceToken
-	return dropped, nil
+	return nil
 }
 
 func logsToCWLogs(logger *zap.Logger, ld pdata.Logs) ([]*cloudwatchlogs.InputLogEvent, int) {
@@ -171,10 +180,10 @@ func logToCWLog(resourceAttrs map[string]interface{}, log pdata.LogRecord) (*clo
 		DroppedAttributesCount: log.DroppedAttributesCount(),
 		Flags:                  log.Flags(),
 	}
-	if traceID := log.TraceID(); traceID.IsValid() {
+	if traceID := log.TraceID(); !traceID.IsEmpty() {
 		body.TraceID = traceID.HexString()
 	}
-	if spanID := log.SpanID(); spanID.IsValid() {
+	if spanID := log.SpanID(); !spanID.IsEmpty() {
 		body.SpanID = spanID.HexString()
 	}
 	body.Attributes = attrsValue(log.Attributes())
@@ -195,36 +204,38 @@ func attrsValue(attrs pdata.AttributeMap) map[string]interface{} {
 		return nil
 	}
 	out := make(map[string]interface{}, attrs.Len())
-	attrs.ForEach(func(k string, v pdata.AttributeValue) {
+	attrs.Range(func(k string, v pdata.AttributeValue) bool {
 		out[k] = attrValue(v)
+		return true
 	})
 	return out
 }
 
 func attrValue(value pdata.AttributeValue) interface{} {
 	switch value.Type() {
-	case pdata.AttributeValueINT:
+	case pdata.AttributeValueTypeInt:
 		return value.IntVal()
-	case pdata.AttributeValueBOOL:
+	case pdata.AttributeValueTypeBool:
 		return value.BoolVal()
-	case pdata.AttributeValueDOUBLE:
+	case pdata.AttributeValueTypeDouble:
 		return value.DoubleVal()
-	case pdata.AttributeValueSTRING:
+	case pdata.AttributeValueTypeString:
 		return value.StringVal()
-	case pdata.AttributeValueMAP:
+	case pdata.AttributeValueTypeMap:
 		values := map[string]interface{}{}
-		value.MapVal().ForEach(func(k string, v pdata.AttributeValue) {
+		value.MapVal().Range(func(k string, v pdata.AttributeValue) bool {
 			values[k] = attrValue(v)
+			return true
 		})
 		return values
-	case pdata.AttributeValueARRAY:
+	case pdata.AttributeValueTypeArray:
 		arrayVal := value.ArrayVal()
 		values := make([]interface{}, arrayVal.Len())
 		for i := 0; i < arrayVal.Len(); i++ {
 			values[i] = attrValue(arrayVal.At(i))
 		}
 		return values
-	case pdata.AttributeValueNULL:
+	case pdata.AttributeValueTypeEmpty:
 		return nil
 	default:
 		return nil

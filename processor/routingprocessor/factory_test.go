@@ -16,25 +16,23 @@ package routingprocessor
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.opentelemetry.io/collector/processor/processorhelper"
-	"go.uber.org/zap"
 )
 
 func TestProcessorGetsCreatedWithValidConfiguration(t *testing.T) {
 	// prepare
 	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
+	creationParams := componenttest.NewNopProcessorCreateSettings()
 	cfg := &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 		DefaultExporters:  []string{"otlp"},
 		FromAttribute:     "X-Tenant",
 		Table: []RoutingTableItem{
@@ -45,34 +43,37 @@ func TestProcessorGetsCreatedWithValidConfiguration(t *testing.T) {
 		},
 	}
 
-	// test
-	exp, err := factory.CreateTracesProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
+	t.Run("traces", func(t *testing.T) {
+		exp, err := factory.CreateTracesProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
+		// verify
+		assert.NoError(t, err)
+		assert.NotNil(t, exp)
+	})
 
-	// verify
-	assert.Nil(t, err)
-	assert.NotNil(t, exp)
+	t.Run("metrics", func(t *testing.T) {
+		exp, err := factory.CreateMetricsProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
+		// verify
+		assert.NoError(t, err)
+		assert.NotNil(t, exp)
+	})
+
+	t.Run("logs", func(t *testing.T) {
+		exp, err := factory.CreateLogsProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
+		// verify
+		assert.NoError(t, err)
+		assert.NotNil(t, exp)
+	})
 }
 
 func TestFailOnEmptyConfiguration(t *testing.T) {
-	// prepare
-	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
-	cfg := factory.CreateDefaultConfig()
-
-	// test
-	exp, err := factory.CreateTracesProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
-
-	// verify
-	assert.Error(t, err)
-	assert.Nil(t, exp)
+	cfg := NewFactory().CreateDefaultConfig()
+	assert.ErrorIs(t, cfg.Validate(), errNoTableItems)
 }
 
 func TestProcessorFailsToBeCreatedWhenRouteHasNoExporters(t *testing.T) {
 	// prepare
-	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
 	cfg := &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 		DefaultExporters:  []string{"otlp"},
 		FromAttribute:     "X-Tenant",
 		Table: []RoutingTableItem{
@@ -81,40 +82,22 @@ func TestProcessorFailsToBeCreatedWhenRouteHasNoExporters(t *testing.T) {
 			},
 		},
 	}
-
-	// test
-	exp, err := factory.CreateTracesProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
-
-	// verify
-	assert.True(t, errors.Is(err, errNoExporters))
-	assert.Nil(t, exp)
+	assert.ErrorIs(t, cfg.Validate(), errNoExporters)
 }
 
 func TestProcessorFailsToBeCreatedWhenNoRoutesExist(t *testing.T) {
-	// prepare
-	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
 	cfg := &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 		DefaultExporters:  []string{"otlp"},
 		FromAttribute:     "X-Tenant",
 		Table:             []RoutingTableItem{},
 	}
-
-	// test
-	exp, err := factory.CreateTracesProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
-
-	// verify
-	assert.True(t, errors.Is(err, errNoTableItems))
-	assert.Nil(t, exp)
+	assert.ErrorIs(t, cfg.Validate(), errNoTableItems)
 }
 
 func TestProcessorFailsWithNoFromAttribute(t *testing.T) {
-	// prepare
-	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
 	cfg := &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 		DefaultExporters:  []string{"otlp"},
 		Table: []RoutingTableItem{
 			{
@@ -123,21 +106,15 @@ func TestProcessorFailsWithNoFromAttribute(t *testing.T) {
 			},
 		},
 	}
-
-	// test
-	exp, err := factory.CreateTracesProcessor(context.Background(), creationParams, cfg, consumertest.NewNop())
-
-	// verify
-	assert.True(t, errors.Is(err, errNoMissingFromAttribute))
-	assert.Nil(t, exp)
+	assert.ErrorIs(t, cfg.Validate(), errNoMissingFromAttribute)
 }
 
 func TestShouldNotFailWhenNextIsProcessor(t *testing.T) {
 	// prepare
 	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
+	creationParams := componenttest.NewNopProcessorCreateSettings()
 	cfg := &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 		DefaultExporters:  []string{"otlp"},
 		FromAttribute:     "X-Tenant",
 		Table: []RoutingTableItem{
@@ -147,7 +124,8 @@ func TestShouldNotFailWhenNextIsProcessor(t *testing.T) {
 			},
 		},
 	}
-	next, err := processorhelper.NewTracesProcessor(cfg, consumertest.NewNop(), &mockProcessor{})
+	mp := &mockProcessor{}
+	next, err := processorhelper.NewTracesProcessor(cfg, consumertest.NewNop(), mp.processTraces)
 	require.NoError(t, err)
 
 	// test
@@ -161,9 +139,9 @@ func TestShouldNotFailWhenNextIsProcessor(t *testing.T) {
 func TestShutdown(t *testing.T) {
 	// prepare
 	factory := NewFactory()
-	creationParams := component.ProcessorCreateSettings{Logger: zap.NewNop()}
+	creationParams := componenttest.NewNopProcessorCreateSettings()
 	cfg := &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 		DefaultExporters:  []string{"otlp"},
 		FromAttribute:     "X-Tenant",
 		Table: []RoutingTableItem{
@@ -187,6 +165,6 @@ func TestShutdown(t *testing.T) {
 
 type mockProcessor struct{}
 
-func (mp *mockProcessor) ProcessTraces(context.Context, pdata.Traces) (pdata.Traces, error) {
+func (mp *mockProcessor) processTraces(context.Context, pdata.Traces) (pdata.Traces, error) {
 	return pdata.NewTraces(), nil
 }

@@ -25,7 +25,6 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.uber.org/zap"
 )
 
 func newHumioFactory(t *testing.T) component.ExporterFactory {
@@ -50,7 +49,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			desc: "Valid trace configuration",
 			cfg: &Config{
-				ExporterSettings: config.NewExporterSettings(config.NewID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
 				Tag:              TagNone,
 				HTTPClientSettings: confighttp.HTTPClientSettings{
 					Endpoint: "http://localhost:8080",
@@ -64,7 +63,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			desc: "Unsanitizable trace configuration",
 			cfg: &Config{
-				ExporterSettings: config.NewExporterSettings(config.NewID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
 				Tag:              TagNone,
 				HTTPClientSettings: confighttp.HTTPClientSettings{
 					Endpoint: "\n",
@@ -75,7 +74,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			desc: "Missing ingest token",
 			cfg: &Config{
-				ExporterSettings: config.NewExporterSettings(config.NewID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
 				Tag:              TagNone,
 				HTTPClientSettings: confighttp.HTTPClientSettings{
 					Endpoint: "http://localhost:8080",
@@ -86,7 +85,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			desc: "Invalid client configuration",
 			cfg: &Config{
-				ExporterSettings: config.NewExporterSettings(config.NewID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
 				Tag:              TagNone,
 				HTTPClientSettings: confighttp.HTTPClientSettings{
 					Endpoint: "http://localhost:8080",
@@ -116,7 +115,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		t.Run(tC.desc, func(t *testing.T) {
 			exp, err := factory.CreateTracesExporter(
 				context.Background(),
-				component.ExporterCreateSettings{Logger: zap.NewNop()},
+				componenttest.NewNopExporterCreateSettings(),
 				tC.cfg,
 			)
 
@@ -142,7 +141,7 @@ func TestCreateMetricsExporter(t *testing.T) {
 	factory := newHumioFactory(t)
 	mExp, err := factory.CreateMetricsExporter(
 		context.Background(),
-		component.ExporterCreateSettings{Logger: zap.NewNop()},
+		componenttest.NewNopExporterCreateSettings(),
 		factory.CreateDefaultConfig(),
 	)
 
@@ -154,7 +153,7 @@ func TestCreateLogsExporter(t *testing.T) {
 	factory := newHumioFactory(t)
 	lExp, err := factory.CreateLogsExporter(
 		context.Background(),
-		component.ExporterCreateSettings{Logger: zap.NewNop()},
+		componenttest.NewNopExporterCreateSettings(),
 		factory.CreateDefaultConfig(),
 	)
 

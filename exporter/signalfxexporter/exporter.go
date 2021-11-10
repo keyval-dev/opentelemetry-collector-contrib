@@ -26,12 +26,12 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.uber.org/zap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/dimensions"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/hostmetadata"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/translation"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/dimensions"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/hostmetadata"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/translation"
 	metadata "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/experimentalmetricmetadata"
 )
 
@@ -68,6 +68,7 @@ type exporterOptions struct {
 	apiURL           *url.URL
 	httpTimeout      time.Duration
 	token            string
+	logDataPoints    bool
 	logDimUpdate     bool
 	metricTranslator *translation.MetricTranslator
 }
@@ -94,17 +95,22 @@ func newSignalFxExporter(
 		return nil, fmt.Errorf("failed to create metric converter: %v", err)
 	}
 
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = config.MaxConnections
+	transport.MaxIdleConnsPerHost = config.MaxConnections
+	transport.IdleConnTimeout = 30 * time.Second
+
 	dpClient := &sfxDPClient{
 		sfxClientBase: sfxClientBase{
 			ingestURL: options.ingestURL,
 			headers:   headers,
 			client: &http.Client{
-				// TODO: What other settings of http.Client to expose via config?
-				//  Or what others change from default values?
-				Timeout: config.Timeout,
+				Timeout:   config.Timeout,
+				Transport: transport,
 			},
 			zippers: newGzipPool(),
 		},
+		logDataPoints:          options.logDataPoints,
 		logger:                 logger,
 		accessTokenPassthrough: config.AccessTokenPassthrough,
 		converter:              converter,
@@ -159,14 +165,18 @@ func newEventExporter(config *Config, logger *zap.Logger) (*signalfxExporter, er
 
 	headers := buildHeaders(config)
 
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = config.MaxConnections
+	transport.MaxIdleConnsPerHost = config.MaxConnections
+	transport.IdleConnTimeout = 30 * time.Second
+
 	eventClient := &sfxEventClient{
 		sfxClientBase: sfxClientBase{
 			ingestURL: options.ingestURL,
 			headers:   headers,
 			client: &http.Client{
-				// TODO: What other settings of http.Client to expose via config?
-				//  Or what others change from default values?
-				Timeout: config.Timeout,
+				Timeout:   config.Timeout,
+				Transport: transport,
 			},
 			zippers: newGzipPool(),
 		},

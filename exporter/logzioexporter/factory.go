@@ -34,9 +34,13 @@ func NewFactory() component.ExporterFactory {
 
 func createDefaultConfig() config.Exporter {
 	return &Config{
-		ExporterSettings: config.NewExporterSettings(config.NewID(typeStr)),
+		ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
 		Region:           "",
 		TracesToken:      "",
+		MetricsToken:     "",
+		DrainInterval:    3,
+		QueueMaxLength:   500000,
+		QueueCapacity:    20 * 1024 * 1024,
 	}
 }
 

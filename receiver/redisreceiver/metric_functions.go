@@ -15,7 +15,7 @@
 package redisreceiver
 
 import (
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 )
 
 // Called once at startup. Returns all of the metrics (except keyspace)
@@ -73,9 +73,10 @@ func getDefaultRedisMetrics() []*redisMetric {
 func uptimeInSeconds() *redisMetric {
 	return &redisMetric{
 		key:         "uptime_in_seconds",
-		name:        "redis/uptime",
+		name:        "redis.uptime",
 		units:       "s",
-		pdType:      pdata.MetricDataTypeIntSum,
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Number of seconds since Redis server start",
 	}
@@ -84,11 +85,12 @@ func uptimeInSeconds() *redisMetric {
 func usedCPUSys() *redisMetric {
 	return &redisMetric{
 		key:         "used_cpu_sys",
-		name:        "redis/cpu/time",
+		name:        "redis.cpu.time",
 		units:       "s",
-		pdType:      pdata.MetricDataTypeDoubleSum,
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeDouble,
 		isMonotonic: true,
-		labels:      map[string]string{"state": "sys"},
+		labels:      map[string]pdata.AttributeValue{"state": pdata.NewAttributeValueString("sys")},
 		desc:        "System CPU consumed by the Redis server in seconds since server start",
 	}
 }
@@ -96,11 +98,12 @@ func usedCPUSys() *redisMetric {
 func usedCPUUser() *redisMetric {
 	return &redisMetric{
 		key:         "used_cpu_user",
-		name:        "redis/cpu/time",
+		name:        "redis.cpu.time",
 		units:       "s",
-		pdType:      pdata.MetricDataTypeDoubleSum,
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeDouble,
 		isMonotonic: true,
-		labels:      map[string]string{"state": "user"},
+		labels:      map[string]pdata.AttributeValue{"state": pdata.NewAttributeValueString("user")},
 		desc:        "User CPU consumed by the Redis server in seconds since server start",
 	}
 }
@@ -108,11 +111,12 @@ func usedCPUUser() *redisMetric {
 func usedCPUSysChildren() *redisMetric {
 	return &redisMetric{
 		key:         "used_cpu_sys_children",
-		name:        "redis/cpu/time",
+		name:        "redis.cpu.time",
 		units:       "s",
-		pdType:      pdata.MetricDataTypeDoubleSum,
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeDouble,
 		isMonotonic: true,
-		labels:      map[string]string{"state": "children"},
+		labels:      map[string]pdata.AttributeValue{"state": pdata.NewAttributeValueString("children")},
 		desc:        "User CPU consumed by the background processes in seconds since server start",
 	}
 }
@@ -120,8 +124,9 @@ func usedCPUSysChildren() *redisMetric {
 func connectedClients() *redisMetric {
 	return &redisMetric{
 		key:         "connected_clients",
-		name:        "redis/clients/connected",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.clients.connected",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: false,
 		desc:        "Number of client connections (excluding connections from replicas)",
 	}
@@ -129,27 +134,30 @@ func connectedClients() *redisMetric {
 
 func clientRecentMaxInputBuffer() *redisMetric {
 	return &redisMetric{
-		key:    "client_recent_max_input_buffer",
-		name:   "redis/clients/max_input_buffer",
-		pdType: pdata.MetricDataTypeIntGauge,
-		desc:   "Biggest input buffer among current client connections",
+		key:       "client_recent_max_input_buffer",
+		name:      "redis.clients.max_input_buffer",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		desc:      "Biggest input buffer among current client connections",
 	}
 }
 
 func clientRecentMaxOutputBuffer() *redisMetric {
 	return &redisMetric{
-		key:    "client_recent_max_output_buffer",
-		name:   "redis/clients/max_output_buffer",
-		pdType: pdata.MetricDataTypeIntGauge,
-		desc:   "Longest output list among current client connections",
+		key:       "client_recent_max_output_buffer",
+		name:      "redis.clients.max_output_buffer",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		desc:      "Longest output list among current client connections",
 	}
 }
 
 func blockedClients() *redisMetric {
 	return &redisMetric{
 		key:         "blocked_clients",
-		name:        "redis/clients/blocked",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.clients.blocked",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: false,
 		desc:        "Number of clients pending on a blocking call",
 	}
@@ -158,8 +166,9 @@ func blockedClients() *redisMetric {
 func expiredKeys() *redisMetric {
 	return &redisMetric{
 		key:         "expired_keys",
-		name:        "redis/keys/expired",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.keys.expired",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Total number of key expiration events",
 	}
@@ -168,8 +177,9 @@ func expiredKeys() *redisMetric {
 func evictedKeys() *redisMetric {
 	return &redisMetric{
 		key:         "evicted_keys",
-		name:        "redis/keys/evicted",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.keys.evicted",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Number of evicted keys due to maxmemory limit",
 	}
@@ -178,8 +188,9 @@ func evictedKeys() *redisMetric {
 func totalConnectionsReceived() *redisMetric {
 	return &redisMetric{
 		key:         "total_connections_received",
-		name:        "redis/connections/received",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.connections.received",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Total number of connections accepted by the server",
 	}
@@ -188,8 +199,9 @@ func totalConnectionsReceived() *redisMetric {
 func rejectedConnections() *redisMetric {
 	return &redisMetric{
 		key:         "rejected_connections",
-		name:        "redis/connections/rejected",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.connections.rejected",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Number of connections rejected because of maxclients limit",
 	}
@@ -197,58 +209,64 @@ func rejectedConnections() *redisMetric {
 
 func usedMemory() *redisMetric {
 	return &redisMetric{
-		key:    "used_memory",
-		name:   "redis/memory/used",
-		units:  "By",
-		pdType: pdata.MetricDataTypeIntGauge,
-		desc:   "Total number of bytes allocated by Redis using its allocator",
+		key:       "used_memory",
+		name:      "redis.memory.used",
+		units:     "By",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		desc:      "Total number of bytes allocated by Redis using its allocator",
 	}
 }
 
 func usedMemoryPeak() *redisMetric {
 	return &redisMetric{
-		key:    "used_memory_peak",
-		name:   "redis/memory/peak",
-		pdType: pdata.MetricDataTypeIntGauge,
-		units:  "By",
-		desc:   "Peak memory consumed by Redis (in bytes)",
+		key:       "used_memory_peak",
+		name:      "redis.memory.peak",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		units:     "By",
+		desc:      "Peak memory consumed by Redis (in bytes)",
 	}
 }
 
 func usedMemoryRss() *redisMetric {
 	return &redisMetric{
-		key:    "used_memory_rss",
-		name:   "redis/memory/rss",
-		pdType: pdata.MetricDataTypeIntGauge,
-		units:  "By",
-		desc:   "Number of bytes that Redis allocated as seen by the operating system",
+		key:       "used_memory_rss",
+		name:      "redis.memory.rss",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		units:     "By",
+		desc:      "Number of bytes that Redis allocated as seen by the operating system",
 	}
 }
 
 func usedMemoryLua() *redisMetric {
 	return &redisMetric{
-		key:    "used_memory_lua",
-		name:   "redis/memory/lua",
-		pdType: pdata.MetricDataTypeIntGauge,
-		units:  "By",
-		desc:   "Number of bytes used by the Lua engine",
+		key:       "used_memory_lua",
+		name:      "redis.memory.lua",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		units:     "By",
+		desc:      "Number of bytes used by the Lua engine",
 	}
 }
 
 func memFragmentationRatio() *redisMetric {
 	return &redisMetric{
-		key:    "mem_fragmentation_ratio",
-		name:   "redis/memory/fragmentation_ratio",
-		pdType: pdata.MetricDataTypeDoubleGauge,
-		desc:   "Ratio between used_memory_rss and used_memory",
+		key:       "mem_fragmentation_ratio",
+		name:      "redis.memory.fragmentation_ratio",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeDouble,
+		desc:      "Ratio between used_memory_rss and used_memory",
 	}
 }
 
 func rdbChangesSinceLastSave() *redisMetric {
 	return &redisMetric{
 		key:         "rdb_changes_since_last_save",
-		name:        "redis/rdb/changes_since_last_save",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.rdb.changes_since_last_save",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: false,
 		desc:        "Number of changes since the last dump",
 	}
@@ -256,19 +274,21 @@ func rdbChangesSinceLastSave() *redisMetric {
 
 func instantaneousOpsPerSec() *redisMetric {
 	return &redisMetric{
-		key:    "instantaneous_ops_per_sec",
-		name:   "redis/commands",
-		pdType: pdata.MetricDataTypeIntGauge,
-		units:  "{ops}/s",
-		desc:   "Number of commands processed per second",
+		key:       "instantaneous_ops_per_sec",
+		name:      "redis.commands",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		units:     "{ops}/s",
+		desc:      "Number of commands processed per second",
 	}
 }
 
 func totalCommandsProcessed() *redisMetric {
 	return &redisMetric{
 		key:         "total_commands_processed",
-		name:        "redis/commands/processed",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.commands.processed",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Total number of commands processed by the server",
 	}
@@ -277,8 +297,9 @@ func totalCommandsProcessed() *redisMetric {
 func totalNetInputBytes() *redisMetric {
 	return &redisMetric{
 		key:         "total_net_input_bytes",
-		name:        "redis/net/input",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.net.input",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		units:       "By",
 		desc:        "The total number of bytes read from the network",
@@ -288,8 +309,9 @@ func totalNetInputBytes() *redisMetric {
 func totalNetOutputBytes() *redisMetric {
 	return &redisMetric{
 		key:         "total_net_output_bytes",
-		name:        "redis/net/output",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.net.output",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		units:       "By",
 		desc:        "The total number of bytes written to the network",
@@ -299,8 +321,9 @@ func totalNetOutputBytes() *redisMetric {
 func keyspaceHits() *redisMetric {
 	return &redisMetric{
 		key:         "keyspace_hits",
-		name:        "redis/keyspace/hits",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.keyspace.hits",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Number of successful lookup of keys in the main dictionary",
 	}
@@ -309,8 +332,9 @@ func keyspaceHits() *redisMetric {
 func keyspaceMisses() *redisMetric {
 	return &redisMetric{
 		key:         "keyspace_misses",
-		name:        "redis/keyspace/misses",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.keyspace.misses",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: true,
 		desc:        "Number of failed lookup of keys in the main dictionary",
 	}
@@ -318,19 +342,21 @@ func keyspaceMisses() *redisMetric {
 
 func latestForkUsec() *redisMetric {
 	return &redisMetric{
-		key:    "latest_fork_usec",
-		name:   "redis/latest_fork",
-		pdType: pdata.MetricDataTypeIntGauge,
-		units:  "us",
-		desc:   "Duration of the latest fork operation in microseconds",
+		key:       "latest_fork_usec",
+		name:      "redis.latest_fork",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		units:     "us",
+		desc:      "Duration of the latest fork operation in microseconds",
 	}
 }
 
 func connectedSlaves() *redisMetric {
 	return &redisMetric{
 		key:         "connected_slaves",
-		name:        "redis/slaves/connected",
-		pdType:      pdata.MetricDataTypeIntSum,
+		name:        "redis.slaves.connected",
+		pdType:      pdata.MetricDataTypeSum,
+		valueType:   pdata.MetricValueTypeInt,
 		isMonotonic: false,
 		desc:        "Number of connected replicas",
 	}
@@ -338,18 +364,20 @@ func connectedSlaves() *redisMetric {
 
 func replBacklogFirstByteOffset() *redisMetric {
 	return &redisMetric{
-		key:    "repl_backlog_first_byte_offset",
-		name:   "redis/replication/backlog_first_byte_offset",
-		pdType: pdata.MetricDataTypeIntGauge,
-		desc:   "The master offset of the replication backlog buffer",
+		key:       "repl_backlog_first_byte_offset",
+		name:      "redis.replication.backlog_first_byte_offset",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		desc:      "The master offset of the replication backlog buffer",
 	}
 }
 
 func masterReplOffset() *redisMetric {
 	return &redisMetric{
-		key:    "master_repl_offset",
-		name:   "redis/replication/offset",
-		pdType: pdata.MetricDataTypeIntGauge,
-		desc:   "The server's current replication offset",
+		key:       "master_repl_offset",
+		name:      "redis.replication.offset",
+		pdType:    pdata.MetricDataTypeGauge,
+		valueType: pdata.MetricValueTypeInt,
+		desc:      "The server's current replication offset",
 	}
 }

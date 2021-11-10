@@ -24,12 +24,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configtest"
-	"go.opentelemetry.io/collector/consumer/pdata"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/collector/model/pdata"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -46,12 +44,12 @@ func TestLoadConfig(t *testing.T) {
 
 	defaultCfg := factory.CreateDefaultConfig()
 	defaultCfg.(*Config).APMServerURL = "https://elastic.example.com"
-	r0 := cfg.Exporters[config.NewID(typeStr)]
+	r0 := cfg.Exporters[config.NewComponentID(typeStr)]
 	assert.Equal(t, r0, defaultCfg)
 
-	r1 := cfg.Exporters[config.NewIDWithName(typeStr, "customname")]
+	r1 := cfg.Exporters[config.NewComponentIDWithName(typeStr, "customname")]
 	assert.Equal(t, r1, &Config{
-		ExporterSettings: config.NewExporterSettings(config.NewIDWithName(typeStr, "customname")),
+		ExporterSettings: config.NewExporterSettings(config.NewComponentIDWithName(typeStr, "customname")),
 		APMServerURL:     "https://elastic.example.com",
 		APIKey:           "RTNxMjlXNEJt",
 		SecretToken:      "hunter2",
@@ -61,7 +59,7 @@ func TestLoadConfig(t *testing.T) {
 func TestConfigValidate(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	params := component.ExporterCreateSettings{Logger: zap.NewNop()}
+	params := componenttest.NewNopExporterCreateSettings()
 
 	_, err := factory.CreateTracesExporter(context.Background(), params, cfg)
 	require.Error(t, err)
@@ -85,7 +83,7 @@ func TestConfigAuth(t *testing.T) {
 
 func testAuth(t *testing.T, apiKey, secretToken, expectedAuthorization string) {
 	factory := NewFactory()
-	params := component.ExporterCreateSettings{Logger: zap.NewNop()}
+	params := componenttest.NewNopExporterCreateSettings()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.APIKey = apiKey
 	cfg.SecretToken = secretToken

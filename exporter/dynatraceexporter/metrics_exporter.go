@@ -24,23 +24,47 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dynatrace-oss/dynatrace-metric-utils-go/metric/apiconstants"
+	"github.com/dynatrace-oss/dynatrace-metric-utils-go/metric/dimensions"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/dynatraceexporter/config"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/dynatraceexporter/serialization"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/ttlmap"
 )
 
-// The maximum number of metrics that may be sent in a single request to the Dynatrace API
-const maxChunkSize = 1000
+const (
+	cSweepIntervalSeconds = 300
+	cMaxAgeSeconds        = 900
+)
 
 // NewExporter exports to a Dynatrace Metrics v2 API
 func newMetricsExporter(params component.ExporterCreateSettings, cfg *config.Config) *exporter {
+	confDefaultDims := []dimensions.Dimension{}
+	for key, value := range cfg.DefaultDimensions {
+		confDefaultDims = append(confDefaultDims, dimensions.NewDimension(key, value))
+	}
+
+	defaultDimensions := dimensions.MergeLists(
+		dimensionsFromTags(cfg.Tags),
+		dimensions.NewNormalizedDimensionList(confDefaultDims...),
+	)
+
+	staticDimensions := dimensions.NewNormalizedDimensionList(dimensions.NewDimension("dt.metrics.source", "opentelemetry"))
+
+	prevPts := ttlmap.New(cSweepIntervalSeconds, cMaxAgeSeconds)
+	prevPts.Start()
+
 	return &exporter{
-		logger: params.Logger,
-		cfg:    cfg,
+		logger:            params.Logger,
+		cfg:               cfg,
+		defaultDimensions: defaultDimensions,
+		staticDimensions:  staticDimensions,
+		prevPts:           prevPts,
 	}
 }
 
@@ -50,18 +74,36 @@ type exporter struct {
 	cfg        *config.Config
 	client     *http.Client
 	isDisabled bool
+
+	defaultDimensions dimensions.NormalizedDimensionList
+	staticDimensions  dimensions.NormalizedDimensionList
+
+	prevPts *ttlmap.TTLMap
 }
 
-const (
-	maxMetricKeyLen = 250
-)
+// for backwards-compatibility with deprecated `Tags` config option
+func dimensionsFromTags(tags []string) dimensions.NormalizedDimensionList {
+	dims := []dimensions.Dimension{}
+	for _, tag := range tags {
+		parts := strings.SplitN(tag, "=", 2)
+		if len(parts) == 2 {
+			dims = append(dims, dimensions.NewDimension(parts[0], parts[1]))
+		}
+	}
+	return dimensions.NewNormalizedDimensionList(dims...)
+}
 
 func (e *exporter) PushMetricsData(ctx context.Context, md pdata.Metrics) error {
 	if e.isDisabled {
 		return nil
 	}
 
-	lines, _ := e.serializeMetrics(md)
+	lines := e.serializeMetrics(md)
+	logEntry := e.logger.Check(zapcore.DebugLevel, "Serialization complete")
+	if logEntry != nil {
+		logEntry.Write(zap.Int("DataPoints", md.DataPointCount()))
+		logEntry.Write(zap.Int("Lines", len(lines)))
+	}
 
 	// If request is empty string, there are no serializable metrics in the batch.
 	// This can happen if all metric names are invalid
@@ -69,7 +111,7 @@ func (e *exporter) PushMetricsData(ctx context.Context, md pdata.Metrics) error 
 		return nil
 	}
 
-	_, err := e.send(ctx, lines)
+	err := e.send(ctx, lines)
 
 	if err != nil {
 		return err
@@ -78,13 +120,10 @@ func (e *exporter) PushMetricsData(ctx context.Context, md pdata.Metrics) error 
 	return nil
 }
 
-func (e *exporter) serializeMetrics(md pdata.Metrics) ([]string, int) {
+func (e *exporter) serializeMetrics(md pdata.Metrics) []string {
 	lines := make([]string, 0)
-	dropped := 0
 
 	resourceMetrics := md.ResourceMetrics()
-
-	e.logger.Debug(fmt.Sprintf("res metric len: %d, e.cfg.Tags: %v\n", resourceMetrics.Len(), e.cfg.Tags))
 
 	for i := 0; i < resourceMetrics.Len(); i++ {
 		resourceMetric := resourceMetrics.At(i)
@@ -94,89 +133,76 @@ func (e *exporter) serializeMetrics(md pdata.Metrics) ([]string, int) {
 			metrics := libraryMetric.Metrics()
 			for k := 0; k < metrics.Len(); k++ {
 				metric := metrics.At(k)
-				name, normalizationError := normalizeMetricName(e.cfg.Prefix, metric.Name())
-				if normalizationError != nil {
-					dropped++
-					e.logger.Error(fmt.Sprintf("Failed to normalize metric name: %s", metric.Name()))
-					continue
+
+				metricLines, err := serialization.SerializeMetric(e.logger, e.cfg.Prefix, metric, e.defaultDimensions, e.staticDimensions, e.prevPts)
+
+				if err != nil {
+					e.logger.Sugar().Errorf("failed to serialize %s %s: %s", metric.DataType().String(), metric.Name(), err.Error())
 				}
 
-				var l []string
-				switch metric.DataType() {
-				case pdata.MetricDataTypeNone:
-					continue
-				case pdata.MetricDataTypeIntGauge:
-					l = serialization.SerializeIntDataPoints(name, metric.IntGauge().DataPoints(), e.cfg.Tags)
-				case pdata.MetricDataTypeDoubleGauge:
-					l = serialization.SerializeDoubleDataPoints(name, metric.DoubleGauge().DataPoints(), e.cfg.Tags)
-				case pdata.MetricDataTypeIntSum:
-					l = serialization.SerializeIntDataPoints(name, metric.IntSum().DataPoints(), e.cfg.Tags)
-				case pdata.MetricDataTypeDoubleSum:
-					l = serialization.SerializeDoubleDataPoints(name, metric.DoubleSum().DataPoints(), e.cfg.Tags)
-				case pdata.MetricDataTypeIntHistogram:
-					l = serialization.SerializeIntHistogramMetrics(name, metric.IntHistogram().DataPoints(), e.cfg.Tags)
-				case pdata.MetricDataTypeHistogram:
-					l = serialization.SerializeHistogramMetrics(name, metric.Histogram().DataPoints(), e.cfg.Tags)
+				if len(metricLines) > 0 {
+					lines = append(lines, metricLines...)
 				}
-				lines = append(lines, l...)
-				e.logger.Debug(fmt.Sprintf("Exporting type %s, Name: %s, len: %d ", metric.DataType().String(), name, len(l)))
+				e.logger.Debug(fmt.Sprintf("Serialized %s %s - %d lines", metric.DataType().String(), metric.Name(), len(metricLines)))
 			}
 		}
 	}
 
-	return lines, dropped
+	return lines
 }
 
 var lastLog int64
 
 // send sends a serialized metric batch to Dynatrace.
-// Returns the number of lines rejected by Dynatrace.
 // An error indicates all lines were dropped regardless of the returned number.
-func (e *exporter) send(ctx context.Context, lines []string) (int, error) {
-	if now := time.Now().Unix(); len(lines) > maxChunkSize && now-lastLog > 60 {
-		e.logger.Warn(fmt.Sprintf("Batch too large. Sending in chunks of %[1]d metrics. If any chunk fails, previous chunks in the batch could be retried by the batch processor. Please set send_batch_max_size to %[1]d or less. Suppressing this log for 60 seconds.", maxChunkSize))
+func (e *exporter) send(ctx context.Context, lines []string) error {
+	e.logger.Sugar().Debugf("Exporting %d lines", len(lines))
+
+	if now := time.Now().Unix(); len(lines) > apiconstants.GetPayloadLinesLimit() && now-lastLog > 60 {
+		e.logger.Warn(fmt.Sprintf("Batch too large. Sending in chunks of %[1]d metrics. If any chunk fails, previous chunks in the batch could be retried by the batch processor. Please set send_batch_max_size to %[1]d or less. Suppressing this log for 60 seconds.", apiconstants.GetPayloadLinesLimit()))
 		lastLog = time.Now().Unix()
 	}
 
-	rejected := 0
-	for i := 0; i < len(lines); i += maxChunkSize {
-		end := i + maxChunkSize
+	for i := 0; i < len(lines); i += apiconstants.GetPayloadLinesLimit() {
+		end := i + apiconstants.GetPayloadLinesLimit()
 
 		if end > len(lines) {
 			end = len(lines)
 		}
 
-		batchRejected, err := e.sendBatch(ctx, lines[i:end])
-		rejected += batchRejected
+		err := e.sendBatch(ctx, lines[i:end])
 		if err != nil {
-			return rejected, err
+			return err
 		}
 	}
 
-	return rejected, nil
+	return nil
 }
 
 // send sends a serialized metric batch to Dynatrace.
-// Returns the number of lines rejected by Dynatrace.
 // An error indicates all lines were dropped regardless of the returned number.
-func (e *exporter) sendBatch(ctx context.Context, lines []string) (int, error) {
+func (e *exporter) sendBatch(ctx context.Context, lines []string) error {
 	message := strings.Join(lines, "\n")
-	e.logger.Debug(fmt.Sprintf("Sending lines to Dynatrace: %d", len(lines)))
+	e.logger.Debug("SendBatch", zap.Int("lines", len(lines)), zap.String("endpoint", e.cfg.Endpoint))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", e.cfg.Endpoint, bytes.NewBufferString(message))
+
 	if err != nil {
-		return 0, consumererror.Permanent(err)
+		return consumererror.NewPermanent(err)
 	}
 
+	e.logger.Debug("Sending request")
 	resp, err := e.client.Do(req)
+
 	if err != nil {
-		return 0, fmt.Errorf("error sending HTTP request: %w", err)
+		return err
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusRequestEntityTooLarge {
 		// If a payload is too large, resending it will not help
-		return 0, consumererror.Permanent(fmt.Errorf("payload too large"))
+		return consumererror.NewPermanent(fmt.Errorf("payload too large"))
 	}
 
 	if resp.StatusCode == http.StatusBadRequest {
@@ -185,14 +211,14 @@ func (e *exporter) sendBatch(ctx context.Context, lines []string) (int, error) {
 		if err != nil {
 			// if the response cannot be read, do not retry the batch as it may have been successful
 			e.logger.Error(fmt.Sprintf("failed to read response: %s", err.Error()))
-			return 0, nil
+			return nil
 		}
 
 		responseBody := metricsResponse{}
 		if err := json.Unmarshal(bodyBytes, &responseBody); err != nil {
 			// if the response cannot be read, do not retry the batch as it may have been successful
 			e.logger.Error(fmt.Sprintf("failed to unmarshal response: %s", err.Error()))
-			return 0, nil
+			return nil
 		}
 
 		e.logger.Debug(fmt.Sprintf("Accepted %d lines", responseBody.Ok))
@@ -209,22 +235,22 @@ func (e *exporter) sendBatch(ctx context.Context, lines []string) (int, error) {
 			}
 		}
 
-		return responseBody.Invalid, nil
+		return nil
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		// Unauthorized and Unauthenticated errors are permanent
 		e.isDisabled = true
-		return 0, consumererror.Permanent(fmt.Errorf(resp.Status))
+		return consumererror.NewPermanent(fmt.Errorf(resp.Status))
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
 		e.isDisabled = true
-		return 0, consumererror.Permanent(fmt.Errorf("dynatrace metrics ingest module is disabled"))
+		return consumererror.NewPermanent(fmt.Errorf("dynatrace metrics ingest module is disabled"))
 	}
 
 	// No known errors
-	return 0, nil
+	return nil
 }
 
 // start starts the exporter
@@ -237,26 +263,6 @@ func (e *exporter) start(_ context.Context, host component.Host) (err error) {
 	e.client = client
 
 	return nil
-}
-
-// normalizeMetricName formats the custom namespace and view name to
-// Metric naming Conventions
-func normalizeMetricName(prefix, name string) (string, error) {
-	normalizedLen := maxMetricKeyLen
-	if l := len(prefix); l != 0 {
-		normalizedLen -= l + 1
-	}
-
-	name, err := serialization.NormalizeString(name, normalizedLen)
-	if err != nil {
-		return "", err
-	}
-
-	if prefix != "" {
-		name = prefix + "." + name
-	}
-
-	return name, nil
 }
 
 // Response from Dynatrace is expected to be in JSON format

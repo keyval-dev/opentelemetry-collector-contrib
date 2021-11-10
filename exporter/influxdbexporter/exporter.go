@@ -22,7 +22,7 @@ import (
 	"github.com/influxdata/influxdb-observability/otel2influx"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 )
 
 type tracesExporter struct {
@@ -46,13 +46,9 @@ func newTracesExporter(config *Config, params component.ExporterCreateSettings) 
 func (e *tracesExporter) pushTraces(ctx context.Context, td pdata.Traces) error {
 	batch := e.writer.newBatch()
 
-	protoBytes, err := td.ToOtlpProtoBytes()
+	err := e.converter.WriteTraces(ctx, td, batch)
 	if err != nil {
-		return consumererror.Permanent(err)
-	}
-	err = e.converter.WriteTracesFromRequestBytes(ctx, protoBytes, batch)
-	if err != nil {
-		return consumererror.Permanent(err)
+		return consumererror.NewPermanent(err)
 	}
 	return batch.flushAndClose(ctx)
 }
@@ -103,13 +99,9 @@ func newMetricsExporter(config *Config, params component.ExporterCreateSettings)
 func (e *metricsExporter) pushMetrics(ctx context.Context, md pdata.Metrics) error {
 	batch := e.writer.newBatch()
 
-	protoBytes, err := md.ToOtlpProtoBytes()
+	err := e.converter.WriteMetrics(ctx, md, batch)
 	if err != nil {
-		return consumererror.Permanent(err)
-	}
-	err = e.converter.WriteMetricsFromRequestBytes(ctx, protoBytes, batch)
-	if err != nil {
-		return consumererror.Permanent(err)
+		return consumererror.NewPermanent(err)
 	}
 	return batch.flushAndClose(ctx)
 }
@@ -147,13 +139,9 @@ func newLogsExporter(config *Config, params component.ExporterCreateSettings) *l
 func (e *logsExporter) pushLogs(ctx context.Context, ld pdata.Logs) error {
 	batch := e.writer.newBatch()
 
-	protoBytes, err := ld.ToOtlpProtoBytes()
+	err := e.converter.WriteLogs(ctx, ld, batch)
 	if err != nil {
-		return consumererror.Permanent(err)
-	}
-	err = e.converter.WriteLogsFromRequestBytes(ctx, protoBytes, batch)
-	if err != nil {
-		return consumererror.Permanent(err)
+		return consumererror.NewPermanent(err)
 	}
 	return batch.flushAndClose(ctx)
 }

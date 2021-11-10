@@ -41,9 +41,6 @@ type NodeClient interface {
 	ClusterFailedNodeCount() int
 	// Get the number of nodes for current cluster
 	ClusterNodeCount() int
-
-	// shutdown is only used internally by clientset to stop the NodeClient
-	shutdown()
 }
 
 type nodeClientOption func(*nodeClient)

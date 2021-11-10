@@ -17,14 +17,15 @@ package sentryexporter
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"testing"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/collector/consumer/pdata"
-	"go.opentelemetry.io/collector/translator/conventions"
+	"go.opentelemetry.io/collector/model/pdata"
+	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 )
 
 /*
@@ -170,6 +171,117 @@ func generateOrphanSpansFromSpans(spans ...*sentry.Span) []*sentry.Span {
 	return orphanSpans
 }
 
+type SpanEventToSentryEventCases struct {
+	testName            string
+	errorMessage        string
+	errorType           string
+	sampleSentrySpan    *sentry.Span
+	expectedSentryEvent *sentry.Event
+	expectedError       error
+}
+
+func TestSpanEventToSentryEvent(t *testing.T) {
+	// Creating expected Sentry Events and Sample Sentry Spans before hand to avoid redundancy
+	sampleSentrySpanForEvent := &sentry.Span{
+		TraceID:      TraceIDFromHex("01020304050607080807060504030201"),
+		SpanID:       SpanIDFromHex("0102030405060708"),
+		ParentSpanID: SpanIDFromHex("0807060504030201"),
+		Description:  "span_name",
+		Op:           "",
+		Tags: map[string]string{
+			"key":             "value",
+			"library_name":    "otel-go",
+			"library_version": "1.4.3",
+			"aws_instance":    "ap-south-1",
+			"unique_id":       "abcd1234",
+			"span_kind":       pdata.SpanKindClient.String(),
+			"status_message":  "message",
+		},
+		StartTime: unixNanoToTime(123),
+		EndTime:   unixNanoToTime(1234567890),
+		Status:    sentry.SpanStatusOK,
+	}
+	sentryEventBase := sentry.Event{
+		Level: "error",
+		Sdk: sentry.SdkInfo{
+			Name:    "sentry.opentelemetry",
+			Version: "0.0.2",
+		},
+		Tags:        sampleSentrySpanForEvent.Tags,
+		Timestamp:   sampleSentrySpanForEvent.EndTime,
+		Transaction: sampleSentrySpanForEvent.Description,
+		Contexts:    map[string]interface{}{},
+		Extra:       map[string]interface{}{},
+		Modules:     map[string]string{},
+		StartTime:   unixNanoToTime(123),
+	}
+	sentryEventBase.Contexts["trace"] = sentry.TraceContext{
+		TraceID:      sampleSentrySpanForEvent.TraceID,
+		SpanID:       sampleSentrySpanForEvent.SpanID,
+		ParentSpanID: sampleSentrySpanForEvent.ParentSpanID,
+		Op:           sampleSentrySpanForEvent.Op,
+		Description:  sampleSentrySpanForEvent.Description,
+		Status:       sampleSentrySpanForEvent.Status,
+	}
+	errorType := "mySampleType"
+	errorMessage := "Kernel Panic"
+	testCases := []SpanEventToSentryEventCases{
+		{
+			testName:         "Exception Event with both exception type and message",
+			errorMessage:     errorMessage,
+			errorType:        errorType,
+			sampleSentrySpan: sampleSentrySpanForEvent,
+			expectedSentryEvent: func() *sentry.Event {
+				expectedSentryEventWithTypeAndMessage := sentryEventBase
+				expectedSentryEventWithTypeAndMessage.Type = errorType
+				expectedSentryEventWithTypeAndMessage.Message = errorMessage
+				expectedSentryEventWithTypeAndMessage.Exception = []sentry.Exception{{
+					Value: errorMessage,
+					Type:  errorType,
+				}}
+				return &expectedSentryEventWithTypeAndMessage
+			}(),
+			expectedError: nil,
+		},
+		{
+			testName:         "Exception Event with only exception type",
+			errorMessage:     "",
+			errorType:        errorType,
+			sampleSentrySpan: sampleSentrySpanForEvent,
+			expectedSentryEvent: func() *sentry.Event {
+				expectedSentryEventWithType := sentryEventBase
+				expectedSentryEventWithType.Type = errorType
+				expectedSentryEventWithType.Exception = []sentry.Exception{{
+					Value: "",
+					Type:  errorType,
+				}}
+				return &expectedSentryEventWithType
+			}(),
+			expectedError: nil,
+		},
+		{
+			testName:            "Exception Event with neither exception type nor exception message",
+			errorMessage:        "",
+			errorType:           "",
+			sampleSentrySpan:    sampleSentrySpanForEvent,
+			expectedSentryEvent: nil,
+			expectedError:       errors.New("error type and error message were both empty"),
+		},
+	}
+
+	for _, test := range testCases {
+		test := test
+		t.Run(test.testName, func(t *testing.T) {
+			sentryEvent, err := sentryEventFromError(test.errorMessage, test.errorType, test.sampleSentrySpan)
+			if sentryEvent != nil {
+				sentryEvent.EventID = test.expectedSentryEvent.EventID
+			}
+			assert.Equal(t, test.expectedError, err)
+			assert.Equal(t, test.expectedSentryEvent, sentryEvent)
+		})
+	}
+}
+
 func TestSpanToSentrySpan(t *testing.T) {
 	t.Run("with root span and invalid parent span_id", func(t *testing.T) {
 		testSpan := pdata.NewSpan()
@@ -177,7 +289,7 @@ func TestSpanToSentrySpan(t *testing.T) {
 
 		sentrySpan := convertToSentrySpan(testSpan, pdata.NewInstrumentationLibrary(), map[string]string{})
 		assert.NotNil(t, sentrySpan)
-		assert.True(t, isRootSpan(sentrySpan))
+		assert.True(t, spanIsTransaction(testSpan))
 	})
 
 	t.Run("with full span", func(t *testing.T) {
@@ -217,7 +329,7 @@ func TestSpanToSentrySpan(t *testing.T) {
 		actual := convertToSentrySpan(testSpan, library, resourceTags)
 
 		assert.NotNil(t, actual)
-		assert.False(t, isRootSpan(actual))
+		assert.False(t, spanIsTransaction(testSpan))
 
 		expected := &sentry.Span{
 			TraceID:      TraceIDFromHex("01020304050607080807060504030201"),
@@ -262,7 +374,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "http-client",
 			name:     "/api/users/{user_id}",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				conventions.AttributeHTTPMethod: pdata.NewAttributeValueString("GET"),
 			}),
 			spanKind:    pdata.SpanKindClient,
@@ -272,7 +384,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "http-server",
 			name:     "/api/users/{user_id}",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				conventions.AttributeHTTPMethod: pdata.NewAttributeValueString("POST"),
 			}),
 			spanKind:    pdata.SpanKindServer,
@@ -282,7 +394,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "db-call-without-statement",
 			name:     "SET mykey 'Val'",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				conventions.AttributeDBSystem: pdata.NewAttributeValueString("redis"),
 			}),
 			spanKind:    pdata.SpanKindClient,
@@ -292,7 +404,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "db-call-with-statement",
 			name:     "mysql call",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				conventions.AttributeDBSystem:    pdata.NewAttributeValueString("sqlite"),
 				conventions.AttributeDBStatement: pdata.NewAttributeValueString("SELECT * FROM table"),
 			}),
@@ -303,7 +415,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "rpc",
 			name:     "grpc.test.EchoService/Echo",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				conventions.AttributeRPCService: pdata.NewAttributeValueString("EchoService"),
 			}),
 			spanKind:    pdata.SpanKindClient,
@@ -313,7 +425,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "message-system",
 			name:     "message-destination",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				"messaging.system": pdata.NewAttributeValueString("kafka"),
 			}),
 			spanKind:    pdata.SpanKindProducer,
@@ -323,7 +435,7 @@ func TestGenerateSpanDescriptors(t *testing.T) {
 		{
 			testName: "faas",
 			name:     "message-destination",
-			attrs: pdata.NewAttributeMap().InitFromMap(map[string]pdata.AttributeValue{
+			attrs: pdata.NewAttributeMapFromMap(map[string]pdata.AttributeValue{
 				"faas.trigger": pdata.NewAttributeValueString("pubsub"),
 			}),
 			spanKind:    pdata.SpanKindServer,
@@ -499,7 +611,7 @@ type mockTransport struct {
 	transactions []*sentry.Event
 }
 
-func (t *mockTransport) SendTransactions(transactions []*sentry.Event) {
+func (t *mockTransport) SendEvents(transactions []*sentry.Event) {
 	t.transactions = transactions
 	t.called = true
 }
@@ -529,7 +641,8 @@ func TestPushTraceData(t *testing.T) {
 			td: func() pdata.Traces {
 				traces := pdata.NewTraces()
 				resourceSpans := pdata.NewResourceSpans()
-				traces.ResourceSpans().Append(resourceSpans)
+				tgt := traces.ResourceSpans().AppendEmpty()
+				resourceSpans.CopyTo(tgt)
 				return traces
 			}(),
 			called: false,

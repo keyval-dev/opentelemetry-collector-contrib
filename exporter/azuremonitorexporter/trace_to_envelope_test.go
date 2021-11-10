@@ -22,8 +22,8 @@ import (
 
 	"github.com/microsoft/ApplicationInsights-Go/appinsights/contracts"
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/collector/consumer/pdata"
-	"go.opentelemetry.io/collector/translator/conventions"
+	"go.opentelemetry.io/collector/model/pdata"
+	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 	"go.uber.org/zap"
 )
 
@@ -848,9 +848,9 @@ func getDefaultInternalSpan() pdata.Span {
 func getResource() pdata.Resource {
 	r := pdata.NewResource()
 	r.Attributes().InitFromMap(map[string]pdata.AttributeValue{
-		conventions.AttributeServiceName:      pdata.NewAttributeValueString(defaultServiceName),
-		conventions.AttributeServiceNamespace: pdata.NewAttributeValueString(defaultServiceNamespace),
-		conventions.AttributeServiceInstance:  pdata.NewAttributeValueString(defaultServiceInstance),
+		conventions.AttributeServiceName:       pdata.NewAttributeValueString(defaultServiceName),
+		conventions.AttributeServiceNamespace:  pdata.NewAttributeValueString(defaultServiceNamespace),
+		conventions.AttributeServiceInstanceID: pdata.NewAttributeValueString(defaultServiceInstance),
 	})
 
 	return r

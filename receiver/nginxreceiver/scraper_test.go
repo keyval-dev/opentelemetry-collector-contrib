@@ -26,7 +26,7 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/nginxreceiver/internal/metadata"
@@ -52,11 +52,11 @@ Reading: 6 Writing: 179 Waiting: 106
 	})
 	err := sc.start(context.Background(), componenttest.NewNopHost())
 	require.NoError(t, err)
-	rms, err := sc.scrape(context.Background())
+	md, err := sc.scrape(context.Background())
 	require.Nil(t, err)
 
-	require.Equal(t, 1, rms.Len())
-	rm := rms.At(0)
+	require.Equal(t, 1, md.ResourceMetrics().Len())
+	rm := md.ResourceMetrics().At(0)
 
 	ilms := rm.InstrumentationLibraryMetrics()
 	require.Equal(t, 1, ilms.Len())
@@ -71,22 +71,20 @@ Reading: 6 Writing: 179 Waiting: 106
 	for i := 0; i < ms.Len(); i++ {
 		m := ms.At(i)
 
-		var dps pdata.IntDataPointSlice
-
 		switch m.DataType() {
-		case pdata.MetricDataTypeIntGauge:
-			dps = m.IntGauge().DataPoints()
+		case pdata.MetricDataTypeGauge:
+			dps := m.Gauge().DataPoints()
 			require.Equal(t, 4, dps.Len())
 			for j := 0; j < dps.Len(); j++ {
 				dp := dps.At(j)
-				state, _ := dp.LabelsMap().Get(metadata.L.State)
-				label := fmt.Sprintf("%s state:%s", m.Name(), state)
-				metricValues[label] = dp.Value()
+				state, _ := dp.Attributes().Get(metadata.L.State)
+				label := fmt.Sprintf("%s state:%s", m.Name(), state.StringVal())
+				metricValues[label] = dp.IntVal()
 			}
-		case pdata.MetricDataTypeIntSum:
-			dps = m.IntSum().DataPoints()
+		case pdata.MetricDataTypeSum:
+			dps := m.Sum().DataPoints()
 			require.Equal(t, 1, dps.Len())
-			metricValues[m.Name()] = dps.At(0).Value()
+			metricValues[m.Name()] = dps.At(0).IntVal()
 		}
 	}
 

@@ -31,9 +31,6 @@ import (
 type PodClient interface {
 	// Get the mapping between the namespace and the number of belonging pods
 	NamespaceToRunningPodNum() map[string]int
-
-	// shutdown is only used internally by clientset to stop the PodClient
-	shutdown()
 }
 
 type podClientOption func(*podClient)

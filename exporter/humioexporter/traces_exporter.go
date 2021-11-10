@@ -21,8 +21,8 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/consumer/pdata"
-	"go.opentelemetry.io/collector/translator/conventions"
+	"go.opentelemetry.io/collector/model/pdata"
+	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 	"go.uber.org/zap"
 )
 
@@ -95,7 +95,7 @@ func (e *humioTracesExporter) pushTraceData(ctx context.Context, td pdata.Traces
 		// All traces failed conversion - no need to retry any more since this is not a
 		// transient failure. By raising a permanent error, the queued retry middleware
 		// will expose a metric for failed spans immediately
-		return consumererror.Permanent(conversionErr)
+		return consumererror.NewPermanent(conversionErr)
 	}
 
 	err := e.client.sendStructuredEvents(ctx, evts)
@@ -148,7 +148,8 @@ func (e *humioTracesExporter) tracesToHumioEvents(td pdata.Traces) ([]*HumioStru
 	if len(droppedTraces) > 0 {
 		dropped := pdata.NewTraces()
 		for _, t := range droppedTraces {
-			dropped.ResourceSpans().Append(t)
+			tgt := dropped.ResourceSpans().AppendEmpty()
+			t.CopyTo(tgt)
 		}
 
 		return results, consumererror.NewTraces(

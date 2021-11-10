@@ -15,12 +15,12 @@
 package awscloudwatchlogsexporter
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/collector/model/pdata"
 )
 
 func TestLogToCWLog(t *testing.T) {
@@ -68,9 +68,7 @@ func TestLogToCWLog(t *testing.T) {
 				t.Errorf("logToCWLog() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("logToCWLog() got = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -130,7 +128,7 @@ func TestAttrValue(t *testing.T) {
 		{
 			name: "null",
 			builder: func() pdata.AttributeValue {
-				return pdata.NewAttributeValueNull()
+				return pdata.NewAttributeValueEmpty()
 			},
 			want: nil,
 		},
@@ -180,11 +178,16 @@ func TestAttrValue(t *testing.T) {
 			builder: func() pdata.AttributeValue {
 				arrAttr := pdata.NewAttributeValueArray()
 				arr := arrAttr.ArrayVal()
-				arr.Append(pdata.NewAttributeValueDouble(1.2))
-				arr.Append(pdata.NewAttributeValueDouble(1.6))
-				arr.Append(pdata.NewAttributeValueBool(true))
-				arr.Append(pdata.NewAttributeValueString("hello"))
-				arr.Append(pdata.NewAttributeValueNull())
+				for _, av := range []pdata.AttributeValue{
+					pdata.NewAttributeValueDouble(1.2),
+					pdata.NewAttributeValueDouble(1.6),
+					pdata.NewAttributeValueBool(true),
+					pdata.NewAttributeValueString("hello"),
+					pdata.NewAttributeValueEmpty(),
+				} {
+					tgt := arr.AppendEmpty()
+					av.CopyTo(tgt)
+				}
 				return arrAttr
 			},
 			want: []interface{}{1.2, 1.6, true, "hello", nil},
@@ -192,9 +195,8 @@ func TestAttrValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := attrValue(tt.builder()); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("attrValue() = %v, want %v", got, tt.want)
-			}
+			got := attrValue(tt.builder())
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

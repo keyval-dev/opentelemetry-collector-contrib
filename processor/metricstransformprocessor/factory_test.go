@@ -22,13 +22,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/config/configcheck"
 	"go.opentelemetry.io/collector/config/configtest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.uber.org/zap"
 )
 
 func TestType(t *testing.T) {
@@ -41,9 +38,9 @@ func TestCreateDefaultConfig(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
 	assert.Equal(t, cfg, &Config{
-		ProcessorSettings: config.NewProcessorSettings(config.NewID(typeStr)),
+		ProcessorSettings: config.NewProcessorSettings(config.NewComponentID(typeStr)),
 	})
-	assert.NoError(t, configcheck.ValidateConfig(cfg))
+	assert.NoError(t, configtest.CheckConfigStruct(cfg))
 }
 
 func TestCreateProcessors(t *testing.T) {
@@ -92,6 +89,11 @@ func TestCreateProcessors(t *testing.T) {
 			errorMessage: fmt.Sprintf("operation %v: missing required field %q while %q is %v", 1, LabelFieldName, ActionFieldName, UpdateLabel),
 		},
 		{
+			configName:   "config_invalid_scale.yaml",
+			succeed:      false,
+			errorMessage: fmt.Sprintf("operation %v: missing required field %q while %q is %v", 1, ScaleFieldName, ActionFieldName, ScaleValue),
+		},
+		{
 			configName:   "config_invalid_regexp.yaml",
 			succeed:      false,
 			errorMessage: fmt.Sprintf("%q, error parsing regexp: missing closing ]: `[\\da`", IncludeFieldName),
@@ -131,7 +133,7 @@ func TestCreateProcessors(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%s", test.configName, name), func(t *testing.T) {
 				tp, tErr := factory.CreateTracesProcessor(
 					context.Background(),
-					component.ProcessorCreateSettings{Logger: zap.NewNop()},
+					componenttest.NewNopProcessorCreateSettings(),
 					cfg,
 					consumertest.NewNop())
 				// Not implemented error
@@ -140,7 +142,7 @@ func TestCreateProcessors(t *testing.T) {
 
 				mp, mErr := factory.CreateMetricsProcessor(
 					context.Background(),
-					component.ProcessorCreateSettings{Logger: zap.NewNop()},
+					componenttest.NewNopProcessorCreateSettings(),
 					cfg,
 					consumertest.NewNop())
 				if test.succeed {
@@ -289,7 +291,8 @@ func TestCreateProcessorsFilledData(t *testing.T) {
 		},
 	}
 
-	internalTransforms := buildHelperConfig(oCfg, "v0.0.1")
+	internalTransforms, err := buildHelperConfig(oCfg, "v0.0.1")
+	assert.NoError(t, err)
 
 	for i, expTr := range expData {
 		mtpT := internalTransforms[i]

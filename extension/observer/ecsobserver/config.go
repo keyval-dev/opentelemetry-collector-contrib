@@ -82,7 +82,7 @@ func (c *Config) Validate() error {
 // DefaultConfig only applies docker label
 func DefaultConfig() Config {
 	return Config{
-		ExtensionSettings: config.NewExtensionSettings(config.NewID(typeStr)),
+		ExtensionSettings: config.NewExtensionSettings(config.NewComponentID(typeStr)),
 		ClusterName:       "default",
 		ClusterRegion:     os.Getenv(awsRegionEnvKey),
 		ResultFile:        "/etc/ecs_sd_targets.yaml",
@@ -96,9 +96,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// ExampleConfig returns an example instance that matches testdata/config_example.yaml.
+// exampleConfig returns an example instance that matches testdata/config_example.yaml.
 // It can be used to validate if the struct tags like mapstructure, yaml are working properly.
-func ExampleConfig() Config {
+func exampleConfig() Config {
 	return Config{
 		ClusterName:     "ecs-sd-test-1",
 		ClusterRegion:   "us-west-2",

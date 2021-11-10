@@ -20,7 +20,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 )
 
 func TestSpanStartTimeIsConvertedToMilliseconds(t *testing.T) {
@@ -160,7 +160,7 @@ func TestSpanEventsAreTranslatedToSpanLogs(t *testing.T) {
 	span.SetTraceID(pdata.NewTraceID([16]byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}))
 	event := pdata.NewSpanEvent()
 	event.SetName("eventName")
-	event.SetTimestamp(pdata.TimestampFromTime(now))
+	event.SetTimestamp(pdata.NewTimestampFromTime(now))
 	eventAttrs := pdata.NewAttributeMap()
 	eventAttrs.InsertString("attrKey", "attrVal")
 	eventAttrs.CopyTo(event.Attributes())
@@ -251,10 +251,9 @@ func spanWithTraceState(state pdata.TraceState) pdata.Span {
 	return span
 }
 
-func transformerFromAttributes(att pdata.AttributeMap) *traceTransformer {
+func transformerFromAttributes(attrs pdata.AttributeMap) *traceTransformer {
 	return &traceTransformer{
-		ResourceAttributes: att,
-		Config:             createDefaultConfig().(*Config),
+		resAttrs: attrs,
 	}
 }
 

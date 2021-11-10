@@ -24,10 +24,10 @@ import (
 
 	sfxpb "github.com/signalfx/com_signalfx_metrics_protobuf/model"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/consumer/pdata"
+	"go.opentelemetry.io/collector/model/pdata"
 	"go.uber.org/zap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/translation"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/translation"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 )
 
@@ -62,7 +62,7 @@ func (s *sfxEventClient) pushLogsData(ctx context.Context, ld pdata.Logs) (int, 
 
 	body, compressed, err := s.encodeBody(sfxEvents)
 	if err != nil {
-		return ld.LogRecordCount(), consumererror.Permanent(err)
+		return ld.LogRecordCount(), consumererror.NewPermanent(err)
 	}
 
 	eventURL := *s.ingestURL
@@ -71,7 +71,7 @@ func (s *sfxEventClient) pushLogsData(ctx context.Context, ld pdata.Logs) (int, 
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", eventURL.String(), body)
 	if err != nil {
-		return ld.LogRecordCount(), consumererror.Permanent(err)
+		return ld.LogRecordCount(), consumererror.NewPermanent(err)
 	}
 
 	for k, v := range s.headers {

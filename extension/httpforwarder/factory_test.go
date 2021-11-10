@@ -21,11 +21,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confighttp"
-	"go.uber.org/zap"
 )
 
 func TestFactory(t *testing.T) {
@@ -34,7 +32,7 @@ func TestFactory(t *testing.T) {
 	require.Equal(t, config.Type(expectType), f.Type())
 
 	cfg := f.CreateDefaultConfig().(*Config)
-	require.Equal(t, config.NewID(typeStr), cfg.ID())
+	require.Equal(t, config.NewComponentID(typeStr), cfg.ID())
 	require.Equal(t, ":6060", cfg.Ingress.Endpoint)
 	require.Equal(t, 10*time.Second, cfg.Egress.Timeout)
 
@@ -65,9 +63,7 @@ func TestFactory(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			e, err := f.CreateExtension(
 				context.Background(),
-				component.ExtensionCreateSettings{
-					Logger: zap.NewNop(),
-				},
+				componenttest.NewNopExtensionCreateSettings(),
 				test.config,
 			)
 			if test.wantErr {

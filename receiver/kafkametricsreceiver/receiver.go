@@ -21,9 +21,10 @@ import (
 	"github.com/Shopify/sarama"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/exporter/kafkaexporter"
 	"go.opentelemetry.io/collector/receiver/scraperhelper"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
 )
 
 const (
@@ -33,7 +34,7 @@ const (
 	consumersScraperName   = "consumers"
 )
 
-type createKafkaScraper func(context.Context, Config, *sarama.Config, *zap.Logger) (scraperhelper.ResourceMetricsScraper, error)
+type createKafkaScraper func(context.Context, Config, *sarama.Config, *zap.Logger) (scraperhelper.Scraper, error)
 
 var (
 	allScrapers = map[string]createKafkaScraper{
@@ -68,7 +69,7 @@ var newMetricsReceiver = func(
 			if err != nil {
 				return nil, err
 			}
-			scraperControllerOptions = append(scraperControllerOptions, scraperhelper.AddResourceMetricsScraper(s))
+			scraperControllerOptions = append(scraperControllerOptions, scraperhelper.AddScraper(s))
 			continue
 		}
 		return nil, fmt.Errorf("no scraper found for key: %s", scraper)
@@ -76,7 +77,7 @@ var newMetricsReceiver = func(
 
 	return scraperhelper.NewScraperControllerReceiver(
 		&config.ScraperControllerSettings,
-		params.Logger,
+		params,
 		consumer,
 		scraperControllerOptions...,
 	)

@@ -15,21 +15,20 @@
 package awscloudwatchlogsexporter
 
 import (
-	"reflect"
 	"testing"
 
-	"go.opentelemetry.io/collector/config/configmodels"
+	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 )
 
 func TestDefaultConfig_exporterSettings(t *testing.T) {
-	config := createDefaultConfig().(*Config)
 	want := &Config{
-		ExporterSettings: configmodels.ExporterSettings{
-			TypeVal: configmodels.Type("awscloudwatchlogs"),
-			NameVal: "awscloudwatchlogs",
+		ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+		RetrySettings:    exporterhelper.DefaultRetrySettings(),
+		QueueSettings: QueueSettings{
+			QueueSize: exporterhelper.DefaultQueueSettings().QueueSize,
 		},
 	}
-	if got := config; !reflect.DeepEqual(got.ExporterSettings, want.ExporterSettings) {
-		t.Errorf("createDefaultConfig().ExporterSettings = %v, want %v", got, want)
-	}
+	assert.Equal(t, want, createDefaultConfig())
 }
