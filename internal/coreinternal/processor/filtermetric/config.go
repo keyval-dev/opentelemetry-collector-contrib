@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filtermetric
+package filtermetric // import "github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/processor/filtermetric"
 
 import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/processor/filterconfig"
@@ -20,15 +20,15 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/processor/filterset/regexp"
 )
 
-// MatchType specifies the strategy for matching against `pdata.Metric`s. This
+// MatchType specifies the strategy for matching against `pmetric.Metric`s. This
 // is distinct from filterset.MatchType which matches against metric (and
 // tracing) names only. To support matching against metric names and
-// `pdata.Metric`s, filtermetric.MatchType is effectively a superset of
+// `pmetric.Metric`s, filtermetric.MatchType is effectively a superset of
 // filterset.MatchType.
 type MatchType string
 
 // These are the MatchTypes that users can specify for filtering
-// `pdata.Metric`s.
+// `pmetric.Metric`s.
 const (
 	Regexp           = MatchType(filterset.Regexp)
 	Strict           = MatchType(filterset.Strict)
@@ -54,4 +54,38 @@ type MatchProperties struct {
 	// ResourceAttributes defines a list of possible resource attributes to match metrics against.
 	// A match occurs if any resource attribute matches all expressions in this given list.
 	ResourceAttributes []filterconfig.Attribute `mapstructure:"resource_attributes"`
+}
+
+func CreateMatchPropertiesFromDefault(properties *filterconfig.MatchProperties) *MatchProperties {
+	if properties == nil {
+		return nil
+	}
+
+	return &MatchProperties{
+		MatchType:          MatchType(properties.Config.MatchType),
+		RegexpConfig:       properties.Config.RegexpConfig,
+		MetricNames:        properties.MetricNames,
+		ResourceAttributes: properties.Resources,
+	}
+}
+
+// ChecksMetrics returns whether the check should iterate through all the metrics
+func (mp *MatchProperties) ChecksMetrics() bool {
+	if mp == nil {
+		return false
+	}
+
+	if mp.MatchType == Expr {
+		return len(mp.Expressions) > 0
+	}
+	return len(mp.MetricNames) > 0
+}
+
+// ChecksResourceAtributes returns whether or not it checks the resource_attributes
+func (mp *MatchProperties) ChecksResourceAtributes() bool {
+	if mp == nil {
+		return false
+	}
+
+	return len(mp.ResourceAttributes) > 0
 }

@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package translator
+package translator // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsxrayreceiver/internal/translator"
 
 import (
 	"strings"
 
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	awsxray "github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/xray"
 )
 
-func addSdkToResource(seg *awsxray.Segment, attrs *pdata.AttributeMap) {
+func addSdkToResource(seg *awsxray.Segment, attrs *pcommon.Map) {
 	if seg.AWS != nil && seg.AWS.XRay != nil {
 		xr := seg.AWS.XRay
 		addString(xr.SDKVersion, conventions.AttributeTelemetrySDKVersion, attrs)

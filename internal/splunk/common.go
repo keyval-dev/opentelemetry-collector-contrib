@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package splunk
+package splunk // import "github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 
 import (
 	"encoding/json"
@@ -26,6 +26,7 @@ const (
 	SFxAccessTokenLabel        = "com.splunk.signalfx.access_token" // #nosec
 	SFxEventCategoryKey        = "com.splunk.signalfx.event_category"
 	SFxEventPropertiesKey      = "com.splunk.signalfx.event_properties"
+	SFxEventType               = "com.splunk.signalfx.event_type"
 	DefaultSourceTypeLabel     = "com.splunk.sourcetype"
 	DefaultSourceLabel         = "com.splunk.source"
 	DefaultIndexLabel          = "com.splunk.index"

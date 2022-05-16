@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package observiqexporter
+package observiqexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/observiqexporter"
 
 import (
 	"bytes"
@@ -22,13 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
@@ -49,7 +50,7 @@ type client struct {
 
 func (c *client) sendLogs(
 	ctx context.Context,
-	ld pdata.Logs,
+	ld plog.Logs,
 ) error {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -205,6 +206,9 @@ func buildClient(config *Config, logger *zap.Logger, buildInfo component.BuildIn
 			Transport: &http.Transport{
 				Proxy:           http.ProxyFromEnvironment,
 				TLSClientConfig: tlsCfg,
+				DialContext: (&net.Dialer{
+					Timeout: config.DialerTimeout,
+				}).DialContext,
 			},
 		},
 		logger:       logger,

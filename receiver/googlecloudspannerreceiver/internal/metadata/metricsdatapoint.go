@@ -12,14 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metadata
+package metadata // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudspannerreceiver/internal/metadata"
 
 import (
+	"fmt"
 	"time"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"github.com/mitchellh/hashstructure"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudspannerreceiver/internal/datasource"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudspannerreceiver/internal/filter"
+)
+
+const (
+	projectIDLabelName  = "project_id"
+	instanceIDLabelName = "instance_id"
+	databaseLabelName   = "database"
 )
 
 type MetricsDataPointKey struct {
@@ -36,8 +46,20 @@ type MetricsDataPoint struct {
 	metricValue MetricValue
 }
 
-func (mdp *MetricsDataPoint) CopyTo(dataPoint pdata.NumberDataPoint) {
-	dataPoint.SetTimestamp(pdata.NewTimestampFromTime(mdp.timestamp))
+// Fields must be exported for hashing purposes
+type dataForHashing struct {
+	MetricName string
+	Labels     []label
+}
+
+// Fields must be exported for hashing purposes
+type label struct {
+	Name  string
+	Value interface{}
+}
+
+func (mdp *MetricsDataPoint) CopyTo(dataPoint pmetric.NumberDataPoint) {
+	dataPoint.SetTimestamp(pcommon.NewTimestampFromTime(mdp.timestamp))
 
 	mdp.metricValue.SetValueTo(dataPoint)
 
@@ -55,7 +77,49 @@ func (mdp *MetricsDataPoint) CopyTo(dataPoint pdata.NumberDataPoint) {
 func (mdp *MetricsDataPoint) GroupingKey() MetricsDataPointKey {
 	return MetricsDataPointKey{
 		MetricName:     mdp.metricName,
-		MetricUnit:     mdp.metricValue.Unit(),
-		MetricDataType: mdp.metricValue.DataType(),
+		MetricUnit:     mdp.metricValue.Metadata().Unit(),
+		MetricDataType: mdp.metricValue.Metadata().DataType(),
 	}
+}
+
+func (mdp *MetricsDataPoint) ToItem() (*filter.Item, error) {
+	seriesKey, err := mdp.hash()
+	if err != nil {
+		return nil, err
+	}
+
+	return &filter.Item{
+		SeriesKey: seriesKey,
+		Timestamp: mdp.timestamp,
+	}, nil
+}
+
+func (mdp *MetricsDataPoint) toDataForHashing() dataForHashing {
+	// Do not use map here because it has unpredicted order
+	// Taking into account 3 default labels: project_id, instance_id, database
+	labels := make([]label, len(mdp.labelValues)+3)
+
+	labels[0] = label{Name: projectIDLabelName, Value: mdp.databaseID.ProjectID()}
+	labels[1] = label{Name: instanceIDLabelName, Value: mdp.databaseID.InstanceID()}
+	labels[2] = label{Name: databaseLabelName, Value: mdp.databaseID.DatabaseName()}
+
+	labelsIndex := 3
+	for _, labelValue := range mdp.labelValues {
+		labels[labelsIndex] = label{Name: labelValue.Metadata().Name(), Value: labelValue.Value()}
+		labelsIndex++
+	}
+
+	return dataForHashing{
+		MetricName: mdp.metricName,
+		Labels:     labels,
+	}
+}
+
+func (mdp *MetricsDataPoint) hash() (string, error) {
+	hashedData, err := hashstructure.Hash(mdp.toDataForHashing(), nil)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%x", hashedData), nil
 }

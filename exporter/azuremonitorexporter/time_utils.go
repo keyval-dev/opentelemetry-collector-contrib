@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package azuremonitorexporter
+package azuremonitorexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuremonitorexporter"
 
 // Contains code common to both trace and metrics exporters
 import (
 	"fmt"
 	"time"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 )
 
-func toTime(t pdata.Timestamp) time.Time {
+func toTime(t pcommon.Timestamp) time.Time {
 	return time.Unix(0, int64(t))
 }
 
@@ -44,3 +44,5 @@ func formatDuration(d time.Duration) string {
 
 	return fmt.Sprintf("%02d.%02d:%02d:%02d.%06d", day, h, m, s, us)
 }
+
+var timeNow = time.Now

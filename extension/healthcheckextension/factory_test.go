@@ -25,7 +25,7 @@ import (
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtest"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testutil"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 )
 
 func TestFactory_CreateDefaultConfig(t *testing.T) {
@@ -35,6 +35,8 @@ func TestFactory_CreateDefaultConfig(t *testing.T) {
 		TCPAddr: confignet.TCPAddr{
 			Endpoint: defaultEndpoint,
 		},
+		CheckCollectorPipeline: defaultCheckCollectorPipelineSettings(),
+		Path:                   "/",
 	}, cfg)
 
 	assert.NoError(t, configtest.CheckConfigStruct(cfg))

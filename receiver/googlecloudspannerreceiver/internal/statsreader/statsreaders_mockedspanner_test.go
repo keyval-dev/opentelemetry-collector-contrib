@@ -24,11 +24,12 @@ import (
 	"cloud.google.com/go/spanner/spannertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 	"google.golang.org/api/option"
 	databasepb "google.golang.org/genproto/googleapis/spanner/admin/database/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudspannerreceiver/internal/datasource"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudspannerreceiver/internal/metadata"
@@ -44,17 +45,17 @@ func createMetricsMetadata(query string) *metadata.MetricsMetadata {
 }
 
 func createMetricsMetadataFromTimestampColumn(query string, timestampColumn string) *metadata.MetricsMetadata {
+	labelValueMetadata, _ := metadata.NewLabelValueMetadata("metric_label", "METRIC_LABEL",
+		metadata.StringValueType)
 	// Labels
-	queryLabelValuesMetadata := []metadata.LabelValueMetadata{
-		metadata.NewStringLabelValueMetadata("metric_label", "METRIC_LABEL"),
-	}
+	queryLabelValuesMetadata := []metadata.LabelValueMetadata{labelValueMetadata}
 
-	metricDataType := metadata.NewMetricDataType(pdata.MetricDataTypeGauge, pdata.MetricAggregationTemporalityUnspecified, false)
+	metricDataType := metadata.NewMetricDataType(pmetric.MetricDataTypeGauge, pmetric.MetricAggregationTemporalityUnspecified, false)
 
+	metricValueMetadata, _ := metadata.NewMetricValueMetadata("metric_value", "METRIC_VALUE", metricDataType, "unit",
+		metadata.IntValueType)
 	// Metrics
-	queryMetricValuesMetadata := []metadata.MetricValueMetadata{
-		metadata.NewInt64MetricValueMetadata("metric_value", "METRIC_VALUE", metricDataType, "unit"),
-	}
+	queryMetricValuesMetadata := []metadata.MetricValueMetadata{metricValueMetadata}
 
 	return &metadata.MetricsMetadata{
 		Name:                      "test stats",
@@ -66,7 +67,7 @@ func createMetricsMetadataFromTimestampColumn(query string, timestampColumn stri
 	}
 }
 
-func createCurrentStatsReaderWithCorruptedMetadata(client *spanner.Client) Reader {
+func createCurrentStatsReaderWithCorruptedMetadata(client *spanner.Client) Reader { //nolint
 	query := "SELECT * FROM STATS"
 	databaseID := datasource.NewDatabaseID(projectID, instanceID, databaseName)
 	databaseFromClient := datasource.NewDatabaseFromClient(client, databaseID)
@@ -75,7 +76,7 @@ func createCurrentStatsReaderWithCorruptedMetadata(client *spanner.Client) Reade
 		createMetricsMetadataFromTimestampColumn(query, "NOT_EXISTING"), ReaderConfig{})
 }
 
-func createCurrentStatsReader(client *spanner.Client) Reader {
+func createCurrentStatsReader(client *spanner.Client) Reader { //nolint
 	query := "SELECT * FROM STATS"
 	databaseID := datasource.NewDatabaseID(projectID, instanceID, databaseName)
 	databaseFromClient := datasource.NewDatabaseFromClient(client, databaseID)
@@ -83,7 +84,7 @@ func createCurrentStatsReader(client *spanner.Client) Reader {
 	return newCurrentStatsReader(zap.NewNop(), databaseFromClient, createMetricsMetadata(query), ReaderConfig{})
 }
 
-func createCurrentStatsReaderWithMaxRowsLimit(client *spanner.Client) Reader {
+func createCurrentStatsReaderWithMaxRowsLimit(client *spanner.Client) Reader { //nolint
 	query := "SELECT * FROM STATS"
 	databaseID := datasource.NewDatabaseID(projectID, instanceID, databaseName)
 	databaseFromClient := datasource.NewDatabaseFromClient(client, databaseID)
@@ -94,7 +95,7 @@ func createCurrentStatsReaderWithMaxRowsLimit(client *spanner.Client) Reader {
 	return newCurrentStatsReader(zap.NewNop(), databaseFromClient, createMetricsMetadata(query), config)
 }
 
-func createIntervalStatsReaderWithCorruptedMetadata(client *spanner.Client, backfillEnabled bool) Reader {
+func createIntervalStatsReaderWithCorruptedMetadata(client *spanner.Client, backfillEnabled bool) Reader { //nolint
 	query := "SELECT * FROM STATS WHERE INTERVAL_END = @pullTimestamp"
 	databaseID := datasource.NewDatabaseID(projectID, instanceID, databaseName)
 	databaseFromClient := datasource.NewDatabaseFromClient(client, databaseID)
@@ -106,7 +107,7 @@ func createIntervalStatsReaderWithCorruptedMetadata(client *spanner.Client, back
 		createMetricsMetadataFromTimestampColumn(query, "NOT_EXISTING"), config)
 }
 
-func createIntervalStatsReader(client *spanner.Client, backfillEnabled bool) Reader {
+func createIntervalStatsReader(client *spanner.Client, backfillEnabled bool) Reader { //nolint
 	query := "SELECT * FROM STATS WHERE INTERVAL_END = @pullTimestamp"
 	databaseID := datasource.NewDatabaseID(projectID, instanceID, databaseName)
 	databaseFromClient := datasource.NewDatabaseFromClient(client, databaseID)
@@ -117,7 +118,7 @@ func createIntervalStatsReader(client *spanner.Client, backfillEnabled bool) Rea
 	return newIntervalStatsReader(zap.NewNop(), databaseFromClient, createMetricsMetadata(query), config)
 }
 
-func createIntervalStatsReaderWithMaxRowsLimit(client *spanner.Client, backfillEnabled bool) Reader {
+func createIntervalStatsReaderWithMaxRowsLimit(client *spanner.Client, backfillEnabled bool) Reader { //nolint
 	query := "SELECT * FROM STATS WHERE INTERVAL_END = @pullTimestamp"
 	databaseID := datasource.NewDatabaseID(projectID, instanceID, databaseName)
 	databaseFromClient := datasource.NewDatabaseFromClient(client, databaseID)
@@ -130,13 +131,14 @@ func createIntervalStatsReaderWithMaxRowsLimit(client *spanner.Client, backfillE
 }
 
 func TestStatsReaders_Read(t *testing.T) {
+	t.Skip("Flaky test - See https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/6318")
 	timestamp := shiftToStartOfMinute(time.Now().UTC())
 	ctx := context.Background()
 	server, err := spannertest.NewServer(":0")
 	require.NoError(t, err)
 	defer server.Close()
 
-	conn, err := grpc.Dial(server.Addr, grpc.WithInsecure())
+	conn, err := grpc.Dial(server.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 
 	databaseAdminClient, err := database.NewDatabaseAdminClient(ctx, option.WithGRPCConn(conn))

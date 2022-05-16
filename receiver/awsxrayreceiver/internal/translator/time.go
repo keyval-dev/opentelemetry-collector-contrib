@@ -12,24 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package translator
+package translator // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsxrayreceiver/internal/translator"
 
 import (
 	"time"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-func addStartTime(startTime *float64, span *pdata.Span) {
+func addStartTime(startTime *float64, span *ptrace.Span) {
 	span.SetStartTimestamp(floatSecToNanoEpoch(startTime))
 }
 
-func addEndTime(endTime *float64, span *pdata.Span) {
+func addEndTime(endTime *float64, span *ptrace.Span) {
 	if endTime != nil {
 		span.SetEndTimestamp(floatSecToNanoEpoch(endTime))
 	}
 }
 
-func floatSecToNanoEpoch(epochSec *float64) pdata.Timestamp {
-	return pdata.Timestamp((*epochSec) * float64(time.Second))
+func floatSecToNanoEpoch(epochSec *float64) pcommon.Timestamp {
+	return pcommon.Timestamp((*epochSec) * float64(time.Second))
 }

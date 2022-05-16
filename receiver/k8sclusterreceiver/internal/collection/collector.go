@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package collection
+package collection // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/internal/collection"
 
 import (
 	"reflect"
@@ -20,14 +20,16 @@ import (
 
 	agentmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/agent/metrics/v1"
 	quotav1 "github.com/openshift/api/quota/v1"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/service/featuregate"
 	"go.uber.org/zap"
 	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/api/autoscaling/v2beta1"
+	autoscalingv2beta2 "k8s.io/api/autoscaling/v2beta2"
 	batchv1 "k8s.io/api/batch/v1"
 	batchv1beta1 "k8s.io/api/batch/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
@@ -65,6 +67,9 @@ const (
 	k8sKindReplicationController = "ReplicationController"
 	k8sKindReplicaSet            = "ReplicaSet"
 	k8sStatefulSet               = "StatefulSet"
+
+	// ID for a temporary feature gate
+	reportCPUMetricsAsDoubleFeatureGateID = "receiver.k8sclusterreceiver.reportCpuMetricsAsDouble"
 )
 
 // DataCollector wraps around a metricsStore and a metadaStore exposing
@@ -72,27 +77,54 @@ const (
 // an interface to interact with refactored code from SignalFx Agent which is
 // confined to the collection package.
 type DataCollector struct {
-	logger                 *zap.Logger
-	metricsStore           *metricsStore
-	metadataStore          *metadataStore
-	nodeConditionsToReport []string
+	logger                   *zap.Logger
+	metricsStore             *metricsStore
+	metadataStore            *metadataStore
+	nodeConditionsToReport   []string
+	allocatableTypesToReport []string
+}
+
+var reportCPUMetricsAsDoubleFeatureGate = featuregate.Gate{
+	ID:      reportCPUMetricsAsDoubleFeatureGateID,
+	Enabled: true,
+	Description: "The k8s container and node cpu metrics being reported by the k8sclusterreceiver are transitioning " +
+		"from being reported as integer millicpu units to being reported as double cpu units to adhere to " +
+		"opentelemetry cpu metric specifications. You can control whether the k8sclusterreceiver reports container " +
+		"and node cpu metrics in double cpu units instead of integer millicpu units with the " +
+		"receiver.k8sclusterreceiver.reportCpuMetricsAsDouble feature gate. " +
+		"For more details see: " +
+		"https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/k8sclusterreceiver/README.md#feature-gate-configurations ",
+}
+
+func init() {
+	featuregate.GetRegistry().MustRegister(reportCPUMetricsAsDoubleFeatureGate)
 }
 
 // NewDataCollector returns a DataCollector.
-func NewDataCollector(logger *zap.Logger, nodeConditionsToReport []string) *DataCollector {
+func NewDataCollector(logger *zap.Logger, nodeConditionsToReport, allocatableTypesToReport []string) *DataCollector {
+	if featuregate.GetRegistry().IsEnabled(reportCPUMetricsAsDoubleFeatureGateID) {
+		logger.Info("The receiver.k8sclusterreceiver.reportCpuMetricsAsDouble feature gate is enabled. This " +
+			"otel collector will report double cpu units, which is good for future support!")
+	} else {
+		logger.Info("WARNING - Breaking Change: " + reportCPUMetricsAsDoubleFeatureGate.Description)
+		logger.Info("The receiver.k8sclusterreceiver.reportCpuMetricsAsDouble feature gate is disabled. This " +
+			"otel collector will report integer cpu units, be aware this will not be supported in the future.")
+	}
+
 	return &DataCollector{
 		logger: logger,
 		metricsStore: &metricsStore{
 			metricsCache: map[types.UID][]*agentmetricspb.ExportMetricsServiceRequest{},
 		},
-		metadataStore:          &metadataStore{},
-		nodeConditionsToReport: nodeConditionsToReport,
+		metadataStore:            &metadataStore{},
+		nodeConditionsToReport:   nodeConditionsToReport,
+		allocatableTypesToReport: allocatableTypesToReport,
 	}
 }
 
-// SetupMetadataStore initializes a metadata store for the kubernetes object.
-func (dc *DataCollector) SetupMetadataStore(o runtime.Object, store cache.Store) {
-	dc.metadataStore.setupStore(o, store)
+// SetupMetadataStore initializes a metadata store for the kubernetes kind.
+func (dc *DataCollector) SetupMetadataStore(gvk schema.GroupVersionKind, store cache.Store) {
+	dc.metadataStore.setupStore(gvk, store)
 }
 
 func (dc *DataCollector) RemoveFromMetricsStore(obj interface{}) {
@@ -115,7 +147,7 @@ func (dc *DataCollector) UpdateMetricsStore(obj interface{}, rm []*resourceMetri
 	}
 }
 
-func (dc *DataCollector) CollectMetricData(currentTime time.Time) pdata.Metrics {
+func (dc *DataCollector) CollectMetricData(currentTime time.Time) pmetric.Metrics {
 	return dc.metricsStore.getMetricData(currentTime)
 }
 
@@ -125,9 +157,9 @@ func (dc *DataCollector) SyncMetrics(obj interface{}) {
 
 	switch o := obj.(type) {
 	case *corev1.Pod:
-		rm = getMetricsForPod(o)
+		rm = getMetricsForPod(o, dc.logger)
 	case *corev1.Node:
-		rm = getMetricsForNode(o, dc.nodeConditionsToReport)
+		rm = getMetricsForNode(o, dc.nodeConditionsToReport, dc.allocatableTypesToReport, dc.logger)
 	case *corev1.Namespace:
 		rm = getMetricsForNamespace(o)
 	case *corev1.ReplicationController:
@@ -144,9 +176,11 @@ func (dc *DataCollector) SyncMetrics(obj interface{}) {
 		rm = getMetricsForStatefulSet(o)
 	case *batchv1.Job:
 		rm = getMetricsForJob(o)
-	case *batchv1beta1.CronJob:
+	case *batchv1.CronJob:
 		rm = getMetricsForCronJob(o)
-	case *v2beta1.HorizontalPodAutoscaler:
+	case *batchv1beta1.CronJob:
+		rm = getMetricsForCronJobBeta(o)
+	case *autoscalingv2beta2.HorizontalPodAutoscaler:
 		rm = getMetricsForHPA(o)
 	case *quotav1.ClusterResourceQuota:
 		rm = getMetricsForClusterResourceQuota(o)
@@ -181,9 +215,11 @@ func (dc *DataCollector) SyncMetadata(obj interface{}) map[metadata.ResourceID]*
 		km = getMetadataForStatefulSet(o)
 	case *batchv1.Job:
 		km = getMetadataForJob(o)
-	case *batchv1beta1.CronJob:
+	case *batchv1.CronJob:
 		km = getMetadataForCronJob(o)
-	case *v2beta1.HorizontalPodAutoscaler:
+	case *batchv1beta1.CronJob:
+		km = getMetadataForCronJobBeta(o)
+	case *autoscalingv2beta2.HorizontalPodAutoscaler:
 		km = getMetadataForHPA(o)
 	}
 

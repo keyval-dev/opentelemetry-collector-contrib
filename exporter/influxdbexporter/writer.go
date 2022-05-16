@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package influxdbexporter
+package influxdbexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/influxdbexporter"
 
 import (
 	"bytes"
@@ -39,7 +39,7 @@ type influxHTTPWriter struct {
 	logger common.Logger
 }
 
-func newInfluxHTTPWriter(logger common.Logger, config *Config, host component.Host) (*influxHTTPWriter, error) {
+func newInfluxHTTPWriter(logger common.Logger, config *Config, host component.Host, settings component.TelemetrySettings) (*influxHTTPWriter, error) {
 	writeURL, err := url.Parse(config.HTTPClientSettings.Endpoint)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func newInfluxHTTPWriter(logger common.Logger, config *Config, host component.Ho
 		config.HTTPClientSettings.Headers["Authorization"] = "Token " + config.Token
 	}
 
-	httpClient, err := config.HTTPClientSettings.ToClient(host.GetExtensions())
+	httpClient, err := config.HTTPClientSettings.ToClient(host.GetExtensions(), settings)
 	if err != nil {
 		return nil, err
 	}

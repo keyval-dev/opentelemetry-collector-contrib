@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint:errcheck
 package oauth2clientauthextension
 
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
@@ -43,11 +48,12 @@ func TestOAuthClientSettings(t *testing.T) {
 		{
 			name: "all_valid_settings",
 			settings: &Config{
-				ClientID:     "testclientid",
-				ClientSecret: "testsecret",
-				TokenURL:     "https://example.com/v1/token",
-				Scopes:       []string{"resource.read"},
-				Timeout:      2,
+				ClientID:       "testclientid",
+				ClientSecret:   "testsecret",
+				EndpointParams: url.Values{"audience": []string{"someaudience"}},
+				TokenURL:       "https://example.com/v1/token",
+				Scopes:         []string{"resource.read"},
+				Timeout:        2,
 				TLSSetting: configtls.TLSClientSetting{
 					TLSSetting: configtls.TLSSetting{
 						CAFile:   testCAFile,
@@ -116,7 +122,7 @@ func TestOAuthClientSettings(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			rc, err := newClientCredentialsExtension(test.settings, zap.NewNop())
+			rc, err := newClientAuthenticator(test.settings, zap.NewNop())
 			if test.shouldError {
 				assert.NotNil(t, err)
 				assert.Contains(t, err.Error(), test.expectedError)
@@ -128,6 +134,7 @@ func TestOAuthClientSettings(t *testing.T) {
 			assert.Equal(t, test.settings.ClientSecret, rc.clientCredentials.ClientSecret)
 			assert.Equal(t, test.settings.ClientID, rc.clientCredentials.ClientID)
 			assert.Equal(t, test.settings.Timeout, rc.client.Timeout)
+			assert.Equal(t, test.settings.EndpointParams, rc.clientCredentials.EndpointParams)
 
 			// test tls settings
 			transport := rc.client.Transport.(*http.Transport)
@@ -179,7 +186,7 @@ func TestRoundTripper(t *testing.T) {
 
 	for _, testcase := range tests {
 		t.Run(testcase.name, func(t *testing.T) {
-			oauth2Authenticator, err := newClientCredentialsExtension(testcase.settings, zap.NewNop())
+			oauth2Authenticator, err := newClientAuthenticator(testcase.settings, zap.NewNop())
 			if testcase.shouldError {
 				assert.Error(t, err)
 				assert.Nil(t, oauth2Authenticator)
@@ -187,7 +194,7 @@ func TestRoundTripper(t *testing.T) {
 			}
 
 			assert.NotNil(t, oauth2Authenticator)
-			roundTripper, err := oauth2Authenticator.RoundTripper(baseRoundTripper)
+			roundTripper, err := oauth2Authenticator.roundTripper(baseRoundTripper)
 			assert.Nil(t, err)
 
 			// test roundTripper is an OAuth RoundTripper
@@ -233,14 +240,14 @@ func TestOAuth2PerRPCCredentials(t *testing.T) {
 
 	for _, testcase := range tests {
 		t.Run(testcase.name, func(t *testing.T) {
-			oauth2Authenticator, err := newClientCredentialsExtension(testcase.settings, zap.NewNop())
+			oauth2Authenticator, err := newClientAuthenticator(testcase.settings, zap.NewNop())
 			if testcase.shouldError {
 				assert.Error(t, err)
 				assert.Nil(t, oauth2Authenticator)
 				return
 			}
 			assert.NoError(t, err)
-			perRPCCredentials, err := oauth2Authenticator.PerRPCCredentials()
+			perRPCCredentials, err := oauth2Authenticator.perRPCCredentials()
 			assert.Nil(t, err)
 			// test perRPCCredentials is an grpc OAuthTokenSource
 			_, ok := perRPCCredentials.(grpcOAuth.TokenSource)
@@ -249,26 +256,43 @@ func TestOAuth2PerRPCCredentials(t *testing.T) {
 	}
 }
 
-func TestOAuthExtensionStart(t *testing.T) {
-	oAuthExtensionAuth, err := newClientCredentialsExtension(
-		&Config{
-			ClientID:     "testclientid",
-			ClientSecret: "testsecret",
-			TokenURL:     "https://example.com/v1/token",
-			Scopes:       []string{"resource.read"},
-		}, nil)
-	assert.Nil(t, err)
-	assert.Nil(t, oAuthExtensionAuth.Start(context.Background(), nil))
-}
+func TestFailContactingOAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("not-json"))
+	}))
+	defer server.Close()
 
-func TestOAuthExtensionShutdown(t *testing.T) {
-	oAuthExtensionAuth, err := newClientCredentialsExtension(
-		&Config{
-			ClientID:     "testclientid",
-			ClientSecret: "testsecret",
-			TokenURL:     "https://example.com/v1/token",
-			Scopes:       []string{"resource.read"},
-		}, nil)
+	serverURL, err := url.Parse(server.URL)
+	assert.NoError(t, err)
+
+	oauth2Authenticator, err := newClientAuthenticator(&Config{
+		ClientID:     "dummy",
+		ClientSecret: "ABC",
+		TokenURL:     serverURL.String(),
+	}, zap.NewNop())
 	assert.Nil(t, err)
-	assert.Nil(t, oAuthExtensionAuth.Shutdown(context.Background()))
+
+	// Test for gRPC connections
+	credential, err := oauth2Authenticator.perRPCCredentials()
+	assert.Nil(t, err)
+
+	_, err = credential.GetRequestMetadata(context.Background())
+	assert.ErrorIs(t, err, errFailedToGetSecurityToken)
+	assert.Contains(t, err.Error(), serverURL.String())
+
+	// Test for HTTP connections
+	setting := confighttp.HTTPClientSettings{
+		Endpoint: "http://example.com/",
+		CustomRoundTripper: func(next http.RoundTripper) (http.RoundTripper, error) {
+			return oauth2Authenticator.roundTripper(next)
+		},
+	}
+
+	client, _ := setting.ToClient(componenttest.NewNopHost().GetExtensions(), componenttest.NewNopTelemetrySettings())
+	req, err := http.NewRequest("POST", setting.Endpoint, nil)
+	assert.NoError(t, err)
+	_, err = client.Do(req)
+	assert.ErrorIs(t, err, errFailedToGetSecurityToken)
+	assert.Contains(t, err.Error(), serverURL.String())
 }

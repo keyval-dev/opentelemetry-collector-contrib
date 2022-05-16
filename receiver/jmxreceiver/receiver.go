@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jmxreceiver
+package jmxreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jmxreceiver"
 
 import (
 	"context"
@@ -30,6 +30,9 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jmxreceiver/internal/subprocess"
 )
+
+// jmxMainClass the class containing the main function for the JMX Metric Gatherer JAR
+const jmxMainClass = "io.opentelemetry.contrib.jmxmetrics.JmxMetrics"
 
 var _ component.MetricsReceiver = (*jmxMetricReceiver)(nil)
 
@@ -70,8 +73,11 @@ func (jmx *jmxMetricReceiver) Start(ctx context.Context, host component.Host) (e
 
 	subprocessConfig := subprocess.Config{
 		ExecutablePath: "java",
-		Args:           append(jmx.config.parseProperties(), "-jar", jmx.config.JARPath, "-config", "-"),
+		Args:           append(jmx.config.parseProperties(), jmxMainClass, "-config", "-"),
 		StdInContents:  javaConfig,
+		EnvironmentVariables: map[string]string{
+			"CLASSPATH": jmx.config.parseClasspath(),
+		},
 	}
 
 	jmx.subprocess = subprocess.NewSubprocess(&subprocessConfig, jmx.logger)

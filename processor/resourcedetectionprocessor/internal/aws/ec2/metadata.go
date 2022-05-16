@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ec2
+package ec2 // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor/internal/aws/ec2"
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 type metadataProvider interface {
 	get(ctx context.Context) (ec2metadata.EC2InstanceIdentityDocument, error)
 	hostname(ctx context.Context) (string, error)
-	available(ctx context.Context) bool
+	instanceID(ctx context.Context) (string, error)
 }
 
 type metadataClient struct {
@@ -39,8 +39,8 @@ func newMetadataClient(sess *session.Session) *metadataClient {
 	}
 }
 
-func (c *metadataClient) available(ctx context.Context) bool {
-	return c.metadata.AvailableWithContext(ctx)
+func (c *metadataClient) instanceID(ctx context.Context) (string, error) {
+	return c.metadata.GetMetadataWithContext(ctx, "instance-id")
 }
 
 func (c *metadataClient) hostname(ctx context.Context) (string, error) {

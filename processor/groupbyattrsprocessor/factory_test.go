@@ -45,17 +45,21 @@ func TestCreateTestProcessor(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, lp)
 	assert.Equal(t, true, lp.Capabilities().MutatesData)
+
+	mp, err := createMetricsProcessor(context.Background(), componenttest.NewNopProcessorCreateSettings(), cfg, consumertest.NewNop())
+	assert.NoError(t, err)
+	assert.NotNil(t, mp)
+	assert.Equal(t, true, mp.Capabilities().MutatesData)
 }
 
 func TestNoKeys(t *testing.T) {
-	gbap, err := createGroupByAttrsProcessor(zap.NewNop(), []string{})
-	assert.Error(t, err)
-	assert.Nil(t, gbap)
+	// This is allowed since can be used for compacting data
+	gap := createGroupByAttrsProcessor(zap.NewNop(), []string{})
+	assert.NotNil(t, gap)
 }
 
 func TestDuplicateKeys(t *testing.T) {
-	gbap, err := createGroupByAttrsProcessor(zap.NewNop(), []string{"foo", "foo", ""})
-	assert.NoError(t, err)
+	gbap := createGroupByAttrsProcessor(zap.NewNop(), []string{"foo", "foo", ""})
 	assert.NotNil(t, gbap)
 	assert.EqualValues(t, []string{"foo"}, gbap.groupByKeys)
 }

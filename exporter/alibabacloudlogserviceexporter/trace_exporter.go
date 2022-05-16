@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package alibabacloudlogserviceexporter
+package alibabacloudlogserviceexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/alibabacloudlogserviceexporter"
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
 )
 
@@ -49,7 +49,7 @@ type logServiceTraceSender struct {
 
 func (s *logServiceTraceSender) pushTraceData(
 	_ context.Context,
-	td pdata.Traces,
+	td ptrace.Traces,
 ) error {
 	var err error
 	slsLogs := traceDataToLogServiceData(td)

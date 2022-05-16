@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package spanprocessor
+package spanprocessor // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanprocessor"
 
 import (
 	"context"
@@ -21,7 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/processor/filterspan"
 )
@@ -80,16 +81,16 @@ func newSpanProcessor(config Config) (*spanProcessor, error) {
 	return sp, nil
 }
 
-func (sp *spanProcessor) processTraces(_ context.Context, td pdata.Traces) (pdata.Traces, error) {
+func (sp *spanProcessor) processTraces(_ context.Context, td ptrace.Traces) (ptrace.Traces, error) {
 	rss := td.ResourceSpans()
 	for i := 0; i < rss.Len(); i++ {
 		rs := rss.At(i)
-		ilss := rs.InstrumentationLibrarySpans()
+		ilss := rs.ScopeSpans()
 		resource := rs.Resource()
 		for j := 0; j < ilss.Len(); j++ {
 			ils := ilss.At(j)
 			spans := ils.Spans()
-			library := ils.InstrumentationLibrary()
+			library := ils.Scope()
 			for k := 0; k < spans.Len(); k++ {
 				s := spans.At(k)
 				if filterspan.SkipSpan(sp.include, sp.exclude, s, resource, library) {
@@ -97,13 +98,14 @@ func (sp *spanProcessor) processTraces(_ context.Context, td pdata.Traces) (pdat
 				}
 				sp.processFromAttributes(s)
 				sp.processToAttributes(s)
+				sp.processUpdateStatus(s)
 			}
 		}
 	}
 	return td, nil
 }
 
-func (sp *spanProcessor) processFromAttributes(span pdata.Span) {
+func (sp *spanProcessor) processFromAttributes(span ptrace.Span) {
 	if len(sp.config.Rename.FromAttributes) == 0 {
 		// There is FromAttributes rule.
 		return
@@ -141,13 +143,13 @@ func (sp *spanProcessor) processFromAttributes(span pdata.Span) {
 		}
 
 		switch attr.Type() {
-		case pdata.AttributeValueTypeString:
+		case pcommon.ValueTypeString:
 			sb.WriteString(attr.StringVal())
-		case pdata.AttributeValueTypeBool:
+		case pcommon.ValueTypeBool:
 			sb.WriteString(strconv.FormatBool(attr.BoolVal()))
-		case pdata.AttributeValueTypeDouble:
+		case pcommon.ValueTypeDouble:
 			sb.WriteString(strconv.FormatFloat(attr.DoubleVal(), 'f', -1, 64))
-		case pdata.AttributeValueTypeInt:
+		case pcommon.ValueTypeInt:
 			sb.WriteString(strconv.FormatInt(attr.IntVal(), 10))
 		default:
 			sb.WriteString("<unknown-attribute-type>")
@@ -156,7 +158,7 @@ func (sp *spanProcessor) processFromAttributes(span pdata.Span) {
 	span.SetName(sb.String())
 }
 
-func (sp *spanProcessor) processToAttributes(span pdata.Span) {
+func (sp *spanProcessor) processToAttributes(span ptrace.Span) {
 	if span.Name() == "" {
 		// There is no span name to work on.
 		return
@@ -217,6 +219,22 @@ func (sp *spanProcessor) processToAttributes(span pdata.Span) {
 		if sp.config.Rename.ToAttributes.BreakAfterMatch {
 			// Stop processing, break after first match is requested.
 			break
+		}
+	}
+}
+
+func (sp *spanProcessor) processUpdateStatus(span ptrace.Span) {
+	cfg := sp.config.SetStatus
+	if cfg != nil {
+		if cfg.Code == statusCodeOk {
+			span.Status().SetCode(ptrace.StatusCodeOk)
+			span.Status().SetMessage("")
+		} else if cfg.Code == statusCodeError {
+			span.Status().SetCode(ptrace.StatusCodeError)
+			span.Status().SetMessage(cfg.Description)
+		} else if cfg.Code == statusCodeUnset {
+			span.Status().SetCode(ptrace.StatusCodeUnset)
+			span.Status().SetMessage("")
 		}
 	}
 }

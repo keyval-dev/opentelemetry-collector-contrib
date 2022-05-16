@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kafkaexporter
+package kafkaexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
 
 import (
 	"github.com/Shopify/sarama"
-	"go.opentelemetry.io/collector/model/otlp"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
 // TracesMarshaler marshals traces into Message array.
 type TracesMarshaler interface {
 	// Marshal serializes spans into sarama's ProducerMessages
-	Marshal(traces pdata.Traces, topic string) ([]*sarama.ProducerMessage, error)
+	Marshal(traces ptrace.Traces, topic string) ([]*sarama.ProducerMessage, error)
 
 	// Encoding returns encoding name
 	Encoding() string
@@ -32,7 +33,7 @@ type TracesMarshaler interface {
 // MetricsMarshaler marshals metrics into Message array
 type MetricsMarshaler interface {
 	// Marshal serializes metrics into sarama's ProducerMessages
-	Marshal(metrics pdata.Metrics, topic string) ([]*sarama.ProducerMessage, error)
+	Marshal(metrics pmetric.Metrics, topic string) ([]*sarama.ProducerMessage, error)
 
 	// Encoding returns encoding name
 	Encoding() string
@@ -41,7 +42,7 @@ type MetricsMarshaler interface {
 // LogsMarshaler marshals logs into Message array
 type LogsMarshaler interface {
 	// Marshal serializes logs into sarama's ProducerMessages
-	Marshal(logs pdata.Logs, topic string) ([]*sarama.ProducerMessage, error)
+	Marshal(logs plog.Logs, topic string) ([]*sarama.ProducerMessage, error)
 
 	// Encoding returns encoding name
 	Encoding() string
@@ -49,11 +50,13 @@ type LogsMarshaler interface {
 
 // tracesMarshalers returns map of supported encodings with TracesMarshaler.
 func tracesMarshalers() map[string]TracesMarshaler {
-	otlpPb := newPdataTracesMarshaler(otlp.NewProtobufTracesMarshaler(), defaultEncoding)
+	otlpPb := newPdataTracesMarshaler(ptrace.NewProtoMarshaler(), defaultEncoding)
+	otlpJSON := newPdataTracesMarshaler(ptrace.NewJSONMarshaler(), "otlp_json")
 	jaegerProto := jaegerMarshaler{marshaler: jaegerProtoSpanMarshaler{}}
 	jaegerJSON := jaegerMarshaler{marshaler: newJaegerJSONMarshaler()}
 	return map[string]TracesMarshaler{
 		otlpPb.Encoding():      otlpPb,
+		otlpJSON.Encoding():    otlpJSON,
 		jaegerProto.Encoding(): jaegerProto,
 		jaegerJSON.Encoding():  jaegerJSON,
 	}
@@ -61,16 +64,20 @@ func tracesMarshalers() map[string]TracesMarshaler {
 
 // metricsMarshalers returns map of supported encodings and MetricsMarshaler
 func metricsMarshalers() map[string]MetricsMarshaler {
-	otlpPb := newPdataMetricsMarshaler(otlp.NewProtobufMetricsMarshaler(), defaultEncoding)
+	otlpPb := newPdataMetricsMarshaler(pmetric.NewProtoMarshaler(), defaultEncoding)
+	otlpJSON := newPdataMetricsMarshaler(pmetric.NewJSONMarshaler(), "otlp_json")
 	return map[string]MetricsMarshaler{
-		otlpPb.Encoding(): otlpPb,
+		otlpPb.Encoding():   otlpPb,
+		otlpJSON.Encoding(): otlpJSON,
 	}
 }
 
 // logsMarshalers returns map of supported encodings and LogsMarshaler
 func logsMarshalers() map[string]LogsMarshaler {
-	otlpPb := newPdataLogsMarshaler(otlp.NewProtobufLogsMarshaler(), defaultEncoding)
+	otlpPb := newPdataLogsMarshaler(plog.NewProtoMarshaler(), defaultEncoding)
+	otlpJSON := newPdataLogsMarshaler(plog.NewJSONMarshaler(), "otlp_json")
 	return map[string]LogsMarshaler{
-		otlpPb.Encoding(): otlpPb,
+		otlpPb.Encoding():   otlpPb,
+		otlpJSON.Encoding(): otlpJSON,
 	}
 }

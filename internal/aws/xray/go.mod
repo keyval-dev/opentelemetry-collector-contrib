@@ -3,8 +3,8 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/xr
 go 1.17
 
 require (
-	github.com/aws/aws-sdk-go v1.41.12
-	github.com/stretchr/testify v1.7.0
+	github.com/aws/aws-sdk-go v1.44.11
+	github.com/stretchr/testify v1.7.1
 )
 
 require (

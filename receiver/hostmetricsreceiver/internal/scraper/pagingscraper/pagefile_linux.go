@@ -15,7 +15,7 @@
 //go:build linux
 // +build linux
 
-package pagingscraper
+package pagingscraper // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/pagingscraper"
 
 import (
 	"bufio"
@@ -95,6 +95,7 @@ func parseSwapsFile(r io.Reader) ([]*pageFileStats, error) {
 			deviceName: fields[nameCol],
 			usedBytes:  usedKiB * 1024,
 			freeBytes:  (totalKiB - usedKiB) * 1024,
+			totalBytes: totalKiB * 1024,
 		})
 	}
 

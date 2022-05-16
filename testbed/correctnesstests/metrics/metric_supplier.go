@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metrics
+package metrics // import "github.com/open-telemetry/opentelemetry-collector-contrib/testbed/correctnesstests/metrics"
 
 import (
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
 type metricSupplier struct {
-	pdms    []pdata.Metrics
+	pdms    []pmetric.Metrics
 	currIdx int
 }
 
-func newMetricSupplier(pdms []pdata.Metrics) *metricSupplier {
+func newMetricSupplier(pdms []pmetric.Metrics) *metricSupplier {
 	return &metricSupplier{pdms: pdms}
 }
 
-func (p *metricSupplier) nextMetrics() (pdm pdata.Metrics, done bool) {
+func (p *metricSupplier) nextMetrics() (pdm pmetric.Metrics, done bool) {
 	if p.currIdx == len(p.pdms) {
-		return pdata.Metrics{}, true
+		return pmetric.Metrics{}, true
 	}
 	pdm = p.pdms[p.currIdx]
 	p.currIdx++

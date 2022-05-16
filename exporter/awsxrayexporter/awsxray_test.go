@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint:errcheck
 package awsxrayexporter
 
 import (
@@ -26,8 +27,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
+	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/awsutil"
 )
@@ -42,6 +46,35 @@ func TestTraceExport(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func TestXraySpanTraceResourceExtraction(t *testing.T) {
+	td := constructSpanData()
+	logger, _ := zap.NewProduction()
+	assert.Len(t, extractResourceSpans(generateConfig(), logger, td), 2, "2 spans have xay trace id")
+}
+
+func TestXrayAndW3CSpanTraceExport(t *testing.T) {
+	traceExporter := initializeTracesExporter()
+	ctx := context.Background()
+	td := constructXrayAndW3CSpanData()
+	err := traceExporter.ConsumeTraces(ctx, td)
+	assert.NotNil(t, err)
+	err = traceExporter.Shutdown(ctx)
+	assert.Nil(t, err)
+}
+
+func TestXrayAndW3CSpanTraceResourceExtraction(t *testing.T) {
+	td := constructXrayAndW3CSpanData()
+	logger, _ := zap.NewProduction()
+	assert.Len(t, extractResourceSpans(generateConfig(), logger, td), 2, "2 spans have xay trace id")
+}
+
+func TestW3CSpanTraceResourceExtraction(t *testing.T) {
+	t.Skip("Flaky test, see https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/9255")
+	td := constructW3CSpanData()
+	logger, _ := zap.NewProduction()
+	assert.Len(t, extractResourceSpans(generateConfig(), logger, td), 0, "0 spans have xray trace id")
+}
+
 func BenchmarkForTracesExporter(b *testing.B) {
 	traceExporter := initializeTracesExporter()
 	for i := 0; i < b.N; i++ {
@@ -54,37 +87,73 @@ func BenchmarkForTracesExporter(b *testing.B) {
 }
 
 func initializeTracesExporter() component.TracesExporter {
-	os.Setenv("AWS_ACCESS_KEY_ID", "AKIASSWVJUY4PZXXXXXX")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "XYrudg2H87u+ADAAq19Wqx3D41a09RsTXXXXXXXX")
-	os.Setenv("AWS_DEFAULT_REGION", "us-east-1")
-	os.Setenv("AWS_REGION", "us-east-1")
-	factory := NewFactory()
-	config := factory.CreateDefaultConfig()
-	config.(*Config).Region = "us-east-1"
-	config.(*Config).LocalMode = true
+	exporterConfig := generateConfig()
 	mconn := new(awsutil.Conn)
-	traceExporter, err := newTracesExporter(config, componenttest.NewNopExporterCreateSettings(), mconn)
+	traceExporter, err := newTracesExporter(exporterConfig, componenttest.NewNopExporterCreateSettings(), mconn)
 	if err != nil {
 		panic(err)
 	}
 	return traceExporter
 }
 
-func constructSpanData() pdata.Traces {
+func generateConfig() config.Exporter {
+	os.Setenv("AWS_ACCESS_KEY_ID", "AKIASSWVJUY4PZXXXXXX")
+	os.Setenv("AWS_SECRET_ACCESS_KEY", "XYrudg2H87u+ADAAq19Wqx3D41a09RsTXXXXXXXX")
+	os.Setenv("AWS_DEFAULT_REGION", "us-east-1")
+	os.Setenv("AWS_REGION", "us-east-1")
+	factory := NewFactory()
+	exporterConfig := factory.CreateDefaultConfig()
+	exporterConfig.(*Config).Region = "us-east-1"
+	exporterConfig.(*Config).LocalMode = true
+	return exporterConfig
+}
+
+func constructSpanData() ptrace.Traces {
 	resource := constructResource()
 
-	traces := pdata.NewTraces()
+	traces := ptrace.NewTraces()
 	rspans := traces.ResourceSpans().AppendEmpty()
 	resource.CopyTo(rspans.Resource())
-	ispans := rspans.InstrumentationLibrarySpans().AppendEmpty()
-	constructHTTPClientSpan().CopyTo(ispans.Spans().AppendEmpty())
-	constructHTTPServerSpan().CopyTo(ispans.Spans().AppendEmpty())
+	ispans := rspans.ScopeSpans().AppendEmpty()
+	constructXrayTraceSpanData(ispans)
 	return traces
 }
 
-func constructResource() pdata.Resource {
-	resource := pdata.NewResource()
-	attrs := pdata.NewAttributeMap()
+// nolint:unused
+func constructW3CSpanData() ptrace.Traces {
+	resource := constructResource()
+	traces := ptrace.NewTraces()
+	rspans := traces.ResourceSpans().AppendEmpty()
+	resource.CopyTo(rspans.Resource())
+	ispans := rspans.ScopeSpans().AppendEmpty()
+	constructW3CFormatTraceSpanData(ispans)
+	return traces
+}
+
+func constructXrayAndW3CSpanData() ptrace.Traces {
+	resource := constructResource()
+	traces := ptrace.NewTraces()
+	rspans := traces.ResourceSpans().AppendEmpty()
+	resource.CopyTo(rspans.Resource())
+	ispans := rspans.ScopeSpans().AppendEmpty()
+	constructXrayTraceSpanData(ispans)
+	constructW3CFormatTraceSpanData(ispans)
+	return traces
+}
+
+func constructXrayTraceSpanData(ispans ptrace.ScopeSpans) {
+	constructHTTPClientSpan(newTraceID()).CopyTo(ispans.Spans().AppendEmpty())
+	constructHTTPServerSpan(newTraceID()).CopyTo(ispans.Spans().AppendEmpty())
+}
+
+func constructW3CFormatTraceSpanData(ispans ptrace.ScopeSpans) {
+	constructHTTPClientSpan(constructW3CTraceID()).CopyTo(ispans.Spans().AppendEmpty())
+	constructHTTPServerSpan(constructW3CTraceID()).CopyTo(ispans.Spans().AppendEmpty())
+}
+
+func constructResource() pcommon.Resource {
+	resource := pcommon.NewResource()
+	attrs := pcommon.NewMap()
 	attrs.InsertString(conventions.AttributeServiceName, "signup_aggregator")
 	attrs.InsertString(conventions.AttributeContainerName, "signup_aggregator")
 	attrs.InsertString(conventions.AttributeContainerImageName, "otel/signupaggregator")
@@ -97,7 +166,7 @@ func constructResource() pdata.Resource {
 	return resource
 }
 
-func constructHTTPClientSpan() pdata.Span {
+func constructHTTPClientSpan(traceID pcommon.TraceID) ptrace.Span {
 	attributes := make(map[string]interface{})
 	attributes[conventions.AttributeHTTPMethod] = "GET"
 	attributes[conventions.AttributeHTTPURL] = "https://api.example.com/users/junit"
@@ -106,16 +175,16 @@ func constructHTTPClientSpan() pdata.Span {
 	startTime := endTime.Add(-90 * time.Second)
 	spanAttributes := constructSpanAttributes(attributes)
 
-	span := pdata.NewSpan()
-	span.SetTraceID(newTraceID())
+	span := ptrace.NewSpan()
+	span.SetTraceID(traceID)
 	span.SetSpanID(newSegmentID())
 	span.SetParentSpanID(newSegmentID())
 	span.SetName("/users/junit")
-	span.SetKind(pdata.SpanKindClient)
-	span.SetStartTimestamp(pdata.NewTimestampFromTime(startTime))
-	span.SetEndTimestamp(pdata.NewTimestampFromTime(endTime))
+	span.SetKind(ptrace.SpanKindClient)
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(startTime))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(endTime))
 
-	status := pdata.NewSpanStatus()
+	status := ptrace.NewSpanStatus()
 	status.SetCode(0)
 	status.SetMessage("OK")
 	status.CopyTo(span.Status())
@@ -124,7 +193,7 @@ func constructHTTPClientSpan() pdata.Span {
 	return span
 }
 
-func constructHTTPServerSpan() pdata.Span {
+func constructHTTPServerSpan(traceID pcommon.TraceID) ptrace.Span {
 	attributes := make(map[string]interface{})
 	attributes[conventions.AttributeHTTPMethod] = "GET"
 	attributes[conventions.AttributeHTTPURL] = "https://api.example.com/users/junit"
@@ -134,16 +203,16 @@ func constructHTTPServerSpan() pdata.Span {
 	startTime := endTime.Add(-90 * time.Second)
 	spanAttributes := constructSpanAttributes(attributes)
 
-	span := pdata.NewSpan()
-	span.SetTraceID(newTraceID())
+	span := ptrace.NewSpan()
+	span.SetTraceID(traceID)
 	span.SetSpanID(newSegmentID())
 	span.SetParentSpanID(newSegmentID())
 	span.SetName("/users/junit")
-	span.SetKind(pdata.SpanKindServer)
-	span.SetStartTimestamp(pdata.NewTimestampFromTime(startTime))
-	span.SetEndTimestamp(pdata.NewTimestampFromTime(endTime))
+	span.SetKind(ptrace.SpanKindServer)
+	span.SetStartTimestamp(pcommon.NewTimestampFromTime(startTime))
+	span.SetEndTimestamp(pcommon.NewTimestampFromTime(endTime))
 
-	status := pdata.NewSpanStatus()
+	status := ptrace.NewSpanStatus()
 	status.SetCode(0)
 	status.SetMessage("OK")
 	status.CopyTo(span.Status())
@@ -152,8 +221,8 @@ func constructHTTPServerSpan() pdata.Span {
 	return span
 }
 
-func constructSpanAttributes(attributes map[string]interface{}) pdata.AttributeMap {
-	attrs := pdata.NewAttributeMap()
+func constructSpanAttributes(attributes map[string]interface{}) pcommon.Map {
+	attrs := pcommon.NewMap()
 	for key, value := range attributes {
 		if cast, ok := value.(int); ok {
 			attrs.InsertInt(key, int64(cast))
@@ -166,7 +235,7 @@ func constructSpanAttributes(attributes map[string]interface{}) pdata.AttributeM
 	return attrs
 }
 
-func newTraceID() pdata.TraceID {
+func newTraceID() pcommon.TraceID {
 	var r [16]byte
 	epoch := time.Now().Unix()
 	binary.BigEndian.PutUint32(r[0:4], uint32(epoch))
@@ -174,14 +243,22 @@ func newTraceID() pdata.TraceID {
 	if err != nil {
 		panic(err)
 	}
-	return pdata.NewTraceID(r)
+	return pcommon.NewTraceID(r)
 }
 
-func newSegmentID() pdata.SpanID {
+func constructW3CTraceID() pcommon.TraceID {
+	var r [16]byte
+	for i := range r {
+		r[i] = byte(rand.Intn(128))
+	}
+	return pcommon.NewTraceID(r)
+}
+
+func newSegmentID() pcommon.SpanID {
 	var r [8]byte
 	_, err := rand.Read(r[:])
 	if err != nil {
 		panic(err)
 	}
-	return pdata.NewSpanID(r)
+	return pcommon.NewSpanID(r)
 }

@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datadogexporter
+package datadogexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter"
 
 import (
 	"context"
+	"os"
+	"sync"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confignet"
-	"go.opentelemetry.io/collector/consumer/consumerhelper"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	ddconfig "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter/config"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter/internal/metadata"
@@ -34,40 +39,52 @@ const (
 	typeStr = "datadog"
 )
 
+type factory struct {
+	onceMetadata sync.Once
+}
+
 // NewFactory creates a Datadog exporter factory
 func NewFactory() component.ExporterFactory {
-	return exporterhelper.NewFactory(
+	f := &factory{}
+	return component.NewExporterFactory(
 		typeStr,
-		createDefaultConfig,
-		exporterhelper.WithMetrics(createMetricsExporter),
-		exporterhelper.WithTraces(createTracesExporter),
+		f.createDefaultConfig,
+		component.WithMetricsExporter(f.createMetricsExporter),
+		component.WithTracesExporter(f.createTracesExporter),
 	)
 }
 
+func defaulttimeoutSettings() exporterhelper.TimeoutSettings {
+	return exporterhelper.TimeoutSettings{
+		Timeout: 15 * time.Second,
+	}
+}
+
 // createDefaultConfig creates the default exporter configuration
-func createDefaultConfig() config.Exporter {
+// TODO (#8396): Remove `os.Getenv` everywhere.
+func (*factory) createDefaultConfig() config.Exporter {
 	return &ddconfig.Config{
 		ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
-		TimeoutSettings:  exporterhelper.DefaultTimeoutSettings(),
-		RetrySettings:    exporterhelper.DefaultRetrySettings(),
-		QueueSettings:    exporterhelper.DefaultQueueSettings(),
+		TimeoutSettings:  defaulttimeoutSettings(),
+		RetrySettings:    exporterhelper.NewDefaultRetrySettings(),
+		QueueSettings:    exporterhelper.NewDefaultQueueSettings(),
 
 		API: ddconfig.APIConfig{
-			Key:  "$DD_API_KEY", // Must be set if using API
-			Site: "$DD_SITE",    // If not provided, set during config sanitization
+			Key:  os.Getenv("DD_API_KEY"), // Must be set if using API
+			Site: os.Getenv("DD_SITE"),    // If not provided, set during config sanitization
 		},
 
 		TagsConfig: ddconfig.TagsConfig{
-			Hostname:   "$DD_HOST",
-			Env:        "$DD_ENV",
-			Service:    "$DD_SERVICE",
-			Version:    "$DD_VERSION",
-			EnvVarTags: "$DD_TAGS", // Only taken into account if Tags is not set
+			Hostname:   os.Getenv("DD_HOST"),
+			Env:        os.Getenv("DD_ENV"),
+			Service:    os.Getenv("DD_SERVICE"),
+			Version:    os.Getenv("DD_VERSION"),
+			EnvVarTags: os.Getenv("DD_TAGS"), // Only taken into account if Tags is not set
 		},
 
 		Metrics: ddconfig.MetricsConfig{
 			TCPAddr: confignet.TCPAddr{
-				Endpoint: "$DD_URL", // If not provided, set during config sanitization
+				Endpoint: os.Getenv("DD_URL"), // If not provided, set during config sanitization
 			},
 			SendMonotonic: true,
 			DeltaTTL:      3600,
@@ -80,14 +97,24 @@ func createDefaultConfig() config.Exporter {
 				Mode:         "distributions",
 				SendCountSum: false,
 			},
+			SumConfig: ddconfig.SumConfig{
+				CumulativeMonotonicMode: ddconfig.CumulativeMonotonicSumModeToDelta,
+			},
+			SummaryConfig: ddconfig.SummaryConfig{
+				Mode: ddconfig.SummaryModeGauges,
+			},
 		},
 
 		Traces: ddconfig.TracesConfig{
-			SampleRate: 1,
 			TCPAddr: confignet.TCPAddr{
-				Endpoint: "$DD_APM_URL", // If not provided, set during config sanitization
+				Endpoint: os.Getenv("DD_APM_URL"), // If not provided, set during config sanitization
 			},
 			IgnoreResources: []string{},
+		},
+
+		HostMetadata: ddconfig.HostMetadataConfig{
+			Enabled:        true,
+			HostnameSource: ddconfig.HostnameSourceFirstResource,
 		},
 
 		SendMetadata:        true,
@@ -96,7 +123,7 @@ func createDefaultConfig() config.Exporter {
 }
 
 // createMetricsExporter creates a metrics exporter based on this config.
-func createMetricsExporter(
+func (f *factory) createMetricsExporter(
 	ctx context.Context,
 	set component.ExporterCreateSettings,
 	c config.Exporter,
@@ -109,32 +136,24 @@ func createMetricsExporter(
 		return nil, err
 	}
 
-	// TODO: Remove after two releases
-	if cfg.Metrics.HistConfig.Mode == "counters" {
-		set.Logger.Warn("Histogram bucket metrics now end with .bucket instead of .count_per_bucket")
-	}
-
-	// TODO: Remove after changing the default mode.
-	set.Logger.Info("Histograms configuration now defaults to 'distributions' mode and no .count and .sum metrics.")
-
 	ctx, cancel := context.WithCancel(ctx)
-	var pushMetricsFn consumerhelper.ConsumeMetricsFunc
+	var pushMetricsFn consumer.ConsumeMetricsFunc
 
 	if cfg.OnlyMetadata {
-		pushMetricsFn = func(_ context.Context, md pdata.Metrics) error {
+		pushMetricsFn = func(_ context.Context, md pmetric.Metrics) error {
 			// only sending metadata use only metrics
-			once := cfg.OnceMetadata()
-			once.Do(func() {
-				attrs := pdata.NewAttributeMap()
+			f.onceMetadata.Do(func() {
+				attrs := pcommon.NewMap()
 				if md.ResourceMetrics().Len() > 0 {
 					attrs = md.ResourceMetrics().At(0).Resource().Attributes()
 				}
-				go metadata.Pusher(ctx, set, cfg, attrs)
+				go metadata.Pusher(ctx, set, newMetadataConfigfromConfig(cfg), attrs)
 			})
+
 			return nil
 		}
 	} else {
-		exp, err := newMetricsExporter(ctx, set, cfg)
+		exp, err := newMetricsExporter(ctx, set, cfg, &f.onceMetadata)
 		if err != nil {
 			cancel()
 			return nil, err
@@ -146,8 +165,10 @@ func createMetricsExporter(
 		cfg,
 		set,
 		pushMetricsFn,
-		exporterhelper.WithTimeout(cfg.TimeoutSettings),
-		exporterhelper.WithRetry(cfg.RetrySettings),
+		// explicitly disable since we rely on http.Client timeout logic.
+		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: 0 * time.Second}),
+		// We use our own custom mechanism for retries, since we hit several endpoints.
+		exporterhelper.WithRetry(exporterhelper.RetrySettings{Enabled: false}),
 		exporterhelper.WithQueue(cfg.QueueSettings),
 		exporterhelper.WithShutdown(func(context.Context) error {
 			cancel()
@@ -162,7 +183,7 @@ func createMetricsExporter(
 }
 
 // createTracesExporter creates a trace exporter based on this config.
-func createTracesExporter(
+func (f *factory) createTracesExporter(
 	ctx context.Context,
 	set component.ExporterCreateSettings,
 	c config.Exporter,
@@ -170,37 +191,44 @@ func createTracesExporter(
 
 	cfg := c.(*ddconfig.Config)
 
-	set.Logger.Info("sanitizing Datadog metrics exporter configuration")
+	set.Logger.Info("sanitizing Datadog traces exporter configuration")
 	if err := cfg.Sanitize(set.Logger); err != nil {
 		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	var pushTracesFn consumerhelper.ConsumeTracesFunc
+	var pushTracesFn consumer.ConsumeTracesFunc
 
 	if cfg.OnlyMetadata {
-		pushTracesFn = func(_ context.Context, td pdata.Traces) error {
+		pushTracesFn = func(_ context.Context, td ptrace.Traces) error {
 			// only sending metadata, use only attributes
-			once := cfg.OnceMetadata()
-			once.Do(func() {
-				attrs := pdata.NewAttributeMap()
+			f.onceMetadata.Do(func() {
+				attrs := pcommon.NewMap()
 				if td.ResourceSpans().Len() > 0 {
 					attrs = td.ResourceSpans().At(0).Resource().Attributes()
 				}
-				go metadata.Pusher(ctx, set, cfg, attrs)
+				go metadata.Pusher(ctx, set, newMetadataConfigfromConfig(cfg), attrs)
 			})
+
 			return nil
 		}
 	} else {
-		pushTracesFn = newTracesExporter(ctx, set, cfg).pushTraceDataScrubbed
+		exporter, err := newTracesExporter(ctx, set, cfg, &f.onceMetadata)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		pushTracesFn = exporter.pushTraceDataScrubbed
 	}
 
 	return exporterhelper.NewTracesExporter(
 		cfg,
 		set,
 		pushTracesFn,
-		exporterhelper.WithTimeout(cfg.TimeoutSettings),
-		exporterhelper.WithRetry(cfg.RetrySettings),
+		// explicitly disable since we rely on http.Client timeout logic.
+		exporterhelper.WithTimeout(exporterhelper.TimeoutSettings{Timeout: 0 * time.Second}),
+		// We don't do retries on traces because of deduping concerns on APM Events.
+		exporterhelper.WithRetry(exporterhelper.RetrySettings{Enabled: false}),
 		exporterhelper.WithQueue(cfg.QueueSettings),
 		exporterhelper.WithShutdown(func(context.Context) error {
 			cancel()

@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package fluentbitextension
+package fluentbitextension // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/fluentbitextension"
 
 import (
 	"context"
+	"sync"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/extension/extensionhelper"
+	"go.uber.org/zap"
 )
 
 const (
@@ -27,9 +28,11 @@ const (
 	typeStr = "fluentbit"
 )
 
+var once sync.Once
+
 // NewFactory creates a factory for FluentBit extension.
 func NewFactory() component.ExtensionFactory {
-	return extensionhelper.NewFactory(
+	return component.NewExtensionFactory(
 		typeStr,
 		createDefaultConfig,
 		createExtension)
@@ -41,7 +44,14 @@ func createDefaultConfig() config.Extension {
 	}
 }
 
+func logDeprecation(logger *zap.Logger) {
+	once.Do(func() {
+		logger.Warn("fluentbit extension is deprecated and will be removed in future versions.")
+	})
+}
+
 func createExtension(_ context.Context, params component.ExtensionCreateSettings, cfg config.Extension) (component.Extension, error) {
+	logDeprecation(params.Logger)
 	config := cfg.(*Config)
 	return newProcessManager(config, params.Logger), nil
 }

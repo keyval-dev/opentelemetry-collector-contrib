@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package awsemfexporter
+package awsemfexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsemfexporter"
 
 import (
 	"encoding/json"
@@ -20,8 +20,10 @@ import (
 	"reflect"
 	"time"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/cwlogs"
 )
 
 const (
@@ -39,12 +41,12 @@ const (
 	fieldPrometheusMetricType = "prom_metric_type"
 )
 
-var fieldPrometheusTypes = map[pdata.MetricDataType]string{
-	pdata.MetricDataTypeNone:      "",
-	pdata.MetricDataTypeGauge:     "gauge",
-	pdata.MetricDataTypeSum:       "counter",
-	pdata.MetricDataTypeHistogram: "histogram",
-	pdata.MetricDataTypeSummary:   "summary",
+var fieldPrometheusTypes = map[pmetric.MetricDataType]string{
+	pmetric.MetricDataTypeNone:      "",
+	pmetric.MetricDataTypeGauge:     "gauge",
+	pmetric.MetricDataTypeSum:       "counter",
+	pmetric.MetricDataTypeHistogram: "histogram",
+	pmetric.MetricDataTypeSummary:   "summary",
 }
 
 type cWMetrics struct {
@@ -79,7 +81,7 @@ type cWMetricMetadata struct {
 	instrumentationLibraryName string
 
 	receiver       string
-	metricDataType pdata.MetricDataType
+	metricDataType pmetric.MetricDataType
 }
 
 type metricTranslator struct {
@@ -97,23 +99,23 @@ func newMetricTranslator(config Config) metricTranslator {
 }
 
 // translateOTelToGroupedMetric converts OT metrics to Grouped Metric format.
-func (mt metricTranslator) translateOTelToGroupedMetric(rm *pdata.ResourceMetrics, groupedMetrics map[interface{}]*groupedMetric, config *Config) error {
+func (mt metricTranslator) translateOTelToGroupedMetric(rm *pmetric.ResourceMetrics, groupedMetrics map[interface{}]*groupedMetric, config *Config) error {
 	timestamp := time.Now().UnixNano() / int64(time.Millisecond)
 	var instrumentationLibName string
 	cWNamespace := getNamespace(rm, config.Namespace)
 	logGroup, logStream, patternReplaceSucceeded := getLogInfo(rm, cWNamespace, config)
 
-	ilms := rm.InstrumentationLibraryMetrics()
+	ilms := rm.ScopeMetrics()
 	var metricReceiver string
 	if receiver, ok := rm.Resource().Attributes().Get(attributeReceiver); ok {
 		metricReceiver = receiver.StringVal()
 	}
 	for j := 0; j < ilms.Len(); j++ {
 		ilm := ilms.At(j)
-		if ilm.InstrumentationLibrary().Name() == "" {
+		if ilm.Scope().Name() == "" {
 			instrumentationLibName = noInstrumentationLibraryName
 		} else {
-			instrumentationLibName = ilm.InstrumentationLibrary().Name()
+			instrumentationLibName = ilm.Scope().Name()
 		}
 
 		metrics := ilm.Metrics()
@@ -337,7 +339,7 @@ func groupedMetricToCWMeasurementsWithFilters(groupedMetric *groupedMetric, conf
 }
 
 // translateCWMetricToEMF converts CloudWatch Metric format to EMF.
-func translateCWMetricToEMF(cWMetric *cWMetrics, config *Config) *logEvent {
+func translateCWMetricToEMF(cWMetric *cWMetrics, config *Config) *cwlogs.Event {
 	// convert CWMetric into map format for compatible with PLE input
 	cWMetricMap := make(map[string]interface{})
 	fieldMap := cWMetric.fields
@@ -384,11 +386,11 @@ func translateCWMetricToEMF(cWMetric *cWMetrics, config *Config) *logEvent {
 	}
 
 	metricCreationTime := cWMetric.timestampMs
-	logEvent := newLogEvent(
+	logEvent := cwlogs.NewEvent(
 		metricCreationTime,
 		string(pleMsg),
 	)
-	logEvent.logGeneratedTime = time.Unix(0, metricCreationTime*int64(time.Millisecond))
+	logEvent.GeneratedTime = time.Unix(0, metricCreationTime*int64(time.Millisecond))
 
 	return logEvent
 }

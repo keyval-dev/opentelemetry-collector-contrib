@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filelogreceiver
+package filelogreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver"
 
 import (
 	"github.com/open-telemetry/opentelemetry-log-collection/operator"
-	"github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/input/file"
+	"github.com/open-telemetry/opentelemetry-log-collection/operator/input/file"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"gopkg.in/yaml.v2"
@@ -49,10 +49,7 @@ func createDefaultConfig() *FileLogConfig {
 		BaseConfig: stanza.BaseConfig{
 			ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
 			Operators:        stanza.OperatorConfigs{},
-			Converter: stanza.ConverterConfig{
-				MaxFlushCount: stanza.DefaultMaxFlushCount,
-				FlushInterval: stanza.DefaultFlushInterval,
-			},
+			Converter:        stanza.ConverterConfig{},
 		},
 		Input: stanza.InputConfig{},
 	}

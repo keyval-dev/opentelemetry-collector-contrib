@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package config // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/dynatraceexporter/config"
 
 import (
 	"errors"
@@ -50,8 +50,11 @@ type Config struct {
 	Tags []string `mapstructure:"tags"`
 }
 
-// ValidateAndConfigureHTTPClientSettings validates the configuration and sets default values
-func (c *Config) ValidateAndConfigureHTTPClientSettings() error {
+func (c *Config) Validate() error {
+	if err := c.QueueSettings.Validate(); err != nil {
+		return fmt.Errorf("queue settings has invalid configuration: %w", err)
+	}
+
 	if c.HTTPClientSettings.Headers == nil {
 		c.HTTPClientSettings.Headers = make(map[string]string)
 	}

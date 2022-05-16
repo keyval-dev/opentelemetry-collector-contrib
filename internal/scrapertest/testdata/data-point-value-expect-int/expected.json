@@ -1,0 +1,22 @@
+{
+   "resourceMetrics": [
+      {
+         "scopeMetrics": [
+            {
+               "metrics": [
+                  {
+                     "name": "gauge.one",
+                     "gauge": {
+                        "dataPoints": [
+                           {
+                              "asInt": 123
+                           }
+                        ]
+                     }
+                  }
+               ]
+            }
+         ]
+      }
+   ]
+}

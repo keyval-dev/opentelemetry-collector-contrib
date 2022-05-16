@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metrics
+package metrics // import "github.com/open-telemetry/opentelemetry-collector-contrib/testbed/correctnesstests/metrics"
 
 import (
 	"log"
@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/service/defaultcomponents"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/correctnesstests"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/testbed"
@@ -58,7 +57,6 @@ func (tc *correctnessTestCase) startCollector() {
 	err = tc.collector.Start(testbed.StartParams{
 		Name:        "Agent",
 		LogFilePath: fname,
-		CmdArgs:     []string{"--metrics-level=NONE"},
 	})
 	require.NoError(tc.t, err)
 }
@@ -105,7 +103,7 @@ func (tc *correctnessTestCase) waitForAllMetrics() {
 }
 
 func componentFactories(t *testing.T) component.Factories {
-	factories, err := defaultcomponents.Components()
+	factories, err := testbed.Components()
 	require.NoError(t, err)
 	return factories
 }

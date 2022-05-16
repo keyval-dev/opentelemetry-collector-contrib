@@ -24,7 +24,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -36,23 +36,22 @@ import (
 	jaegerthrift "github.com/jaegertracing/jaeger/thrift-gen/jaeger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
-	"go.opentelemetry.io/collector/obsreport"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testutil"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger"
 )
 
@@ -62,19 +61,6 @@ func TestTraceSource(t *testing.T) {
 	set := componenttest.NewNopReceiverCreateSettings()
 	jr := newJaegerReceiver(jaegerReceiver, &configuration{}, nil, set)
 	require.NotNil(t, jr)
-}
-
-type traceConsumer struct {
-	cb func(context.Context, pdata.Traces)
-}
-
-func (t traceConsumer) Capabilities() consumer.Capabilities {
-	return consumer.Capabilities{MutatesData: false}
-}
-
-func (t traceConsumer) ConsumeTraces(ctx context.Context, td pdata.Traces) error {
-	go t.cb(ctx, td)
-	return nil
 }
 
 func jaegerBatchToHTTPBody(b *jaegerthrift.Batch) (*http.Request, error) {
@@ -101,39 +87,6 @@ func TestThriftHTTPBodyDecode(t *testing.T) {
 	assert.Equal(t, batch, gotBatch)
 }
 
-func TestClientIPDetection(t *testing.T) {
-	ch := make(chan context.Context)
-	jr := jReceiver{
-		nextConsumer: traceConsumer{
-			func(ctx context.Context, _ pdata.Traces) {
-				ch <- ctx
-			},
-		},
-		grpcObsrecv: obsreport.NewReceiver(obsreport.ReceiverSettings{ReceiverCreateSettings: componenttest.NewNopReceiverCreateSettings()}),
-		httpObsrecv: obsreport.NewReceiver(obsreport.ReceiverSettings{ReceiverCreateSettings: componenttest.NewNopReceiverCreateSettings()}),
-	}
-	batch := &jaegerthrift.Batch{
-		Process: jaegerthrift.NewProcess(),
-		Spans:   []*jaegerthrift.Span{jaegerthrift.NewSpan()},
-	}
-	r, err := jaegerBatchToHTTPBody(batch)
-	require.NoError(t, err)
-
-	wantClient, ok := client.FromHTTP(r)
-	assert.True(t, ok)
-	jr.HandleThriftHTTPBatch(httptest.NewRecorder(), r)
-
-	select {
-	case ctx := <-ch:
-		gotClient, ok := client.FromContext(ctx)
-		assert.True(t, ok, "must get client back from context")
-		assert.Equal(t, wantClient, gotClient)
-		break
-	case <-time.After(time.Second * 2):
-		t.Error("next consumer did not receive the batch")
-	}
-}
-
 func TestReception(t *testing.T) {
 	port := testutil.GetAvailablePort(t)
 	// 1. Create the Jaeger receiver aka "server"
@@ -154,7 +107,7 @@ func TestReception(t *testing.T) {
 	// 2. Then send spans to the Jaeger receiver.
 	collectorAddr := fmt.Sprintf("http://localhost:%d/api/traces", port)
 	td := generateTraceData()
-	batches, err := jaeger.InternalTracesToJaegerProto(td)
+	batches, err := jaeger.ProtoFromTraces(td)
 	require.NoError(t, err)
 	for _, batch := range batches {
 		require.NoError(t, sendToCollector(collectorAddr, modelToThrift(batch)))
@@ -209,7 +162,7 @@ func TestGRPCReception(t *testing.T) {
 	require.NoError(t, jr.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() { require.NoError(t, jr.Shutdown(context.Background())) })
 
-	conn, err := grpc.Dial(fmt.Sprintf("0.0.0.0:%d", config.CollectorGRPCPort), grpc.WithInsecure())
+	conn, err := grpc.Dial(fmt.Sprintf("0.0.0.0:%d", config.CollectorGRPCPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -242,8 +195,8 @@ func TestGRPCReceptionWithTLS(t *testing.T) {
 	// prepare
 	tlsCreds := &configtls.TLSServerSetting{
 		TLSSetting: configtls.TLSSetting{
-			CertFile: path.Join(".", "testdata", "server.crt"),
-			KeyFile:  path.Join(".", "testdata", "server.key"),
+			CertFile: filepath.Join("testdata", "server.crt"),
+			KeyFile:  filepath.Join("testdata", "server.key"),
 		},
 	}
 
@@ -264,7 +217,7 @@ func TestGRPCReceptionWithTLS(t *testing.T) {
 	require.NoError(t, jr.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() { require.NoError(t, jr.Shutdown(context.Background())) })
 
-	creds, err := credentials.NewClientTLSFromFile(path.Join(".", "testdata", "server.crt"), "localhost")
+	creds, err := credentials.NewClientTLSFromFile(filepath.Join("testdata", "server.crt"), "localhost")
 	require.NoError(t, err)
 	conn, err := grpc.Dial(jr.collectorGRPCAddr(), grpc.WithTransportCredentials(creds))
 	require.NoError(t, err)
@@ -294,37 +247,37 @@ func TestGRPCReceptionWithTLS(t *testing.T) {
 	assert.EqualValues(t, want, gotTraces[0])
 }
 
-func expectedTraceData(t1, t2, t3 time.Time) pdata.Traces {
-	traceID := pdata.NewTraceID(
+func expectedTraceData(t1, t2, t3 time.Time) ptrace.Traces {
+	traceID := pcommon.NewTraceID(
 		[16]byte{0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF, 0x80})
-	parentSpanID := pdata.NewSpanID([8]byte{0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18})
-	childSpanID := pdata.NewSpanID([8]byte{0xAF, 0xAE, 0xAD, 0xAC, 0xAB, 0xAA, 0xA9, 0xA8})
+	parentSpanID := pcommon.NewSpanID([8]byte{0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18})
+	childSpanID := pcommon.NewSpanID([8]byte{0xAF, 0xAE, 0xAD, 0xAC, 0xAB, 0xAA, 0xA9, 0xA8})
 
-	traces := pdata.NewTraces()
+	traces := ptrace.NewTraces()
 	rs := traces.ResourceSpans().AppendEmpty()
 	rs.Resource().Attributes().InsertString(conventions.AttributeServiceName, "issaTest")
 	rs.Resource().Attributes().InsertBool("bool", true)
 	rs.Resource().Attributes().InsertString("string", "yes")
 	rs.Resource().Attributes().InsertInt("int64", 10000000)
-	spans := rs.InstrumentationLibrarySpans().AppendEmpty().Spans()
+	spans := rs.ScopeSpans().AppendEmpty().Spans()
 
 	span0 := spans.AppendEmpty()
 	span0.SetSpanID(childSpanID)
 	span0.SetParentSpanID(parentSpanID)
 	span0.SetTraceID(traceID)
 	span0.SetName("DBSearch")
-	span0.SetStartTimestamp(pdata.NewTimestampFromTime(t1))
-	span0.SetEndTimestamp(pdata.NewTimestampFromTime(t2))
-	span0.Status().SetCode(pdata.StatusCodeError)
+	span0.SetStartTimestamp(pcommon.NewTimestampFromTime(t1))
+	span0.SetEndTimestamp(pcommon.NewTimestampFromTime(t2))
+	span0.Status().SetCode(ptrace.StatusCodeError)
 	span0.Status().SetMessage("Stale indices")
 
 	span1 := spans.AppendEmpty()
 	span1.SetSpanID(parentSpanID)
 	span1.SetTraceID(traceID)
 	span1.SetName("ProxyFetch")
-	span1.SetStartTimestamp(pdata.NewTimestampFromTime(t2))
-	span1.SetEndTimestamp(pdata.NewTimestampFromTime(t3))
-	span1.Status().SetCode(pdata.StatusCodeError)
+	span1.SetStartTimestamp(pcommon.NewTimestampFromTime(t2))
+	span1.SetEndTimestamp(pcommon.NewTimestampFromTime(t3))
+	span1.Status().SetCode(ptrace.StatusCodeError)
 	span1.Status().SetMessage("Frontend crash")
 
 	return traces
@@ -355,7 +308,7 @@ func grpcFixture(t1 time.Time, d1, d2 time.Duration) *api_v2.PostSpansRequest {
 					Duration:      d1,
 					Tags: []model.KeyValue{
 						model.String(conventions.OtelStatusDescription, "Stale indices"),
-						model.Int64(conventions.OtelStatusCode, int64(pdata.StatusCodeError)),
+						model.Int64(conventions.OtelStatusCode, int64(ptrace.StatusCodeError)),
 						model.Bool("error", true),
 					},
 					References: []model.SpanRef{
@@ -374,7 +327,7 @@ func grpcFixture(t1 time.Time, d1, d2 time.Duration) *api_v2.PostSpansRequest {
 					Duration:      d2,
 					Tags: []model.KeyValue{
 						model.String(conventions.OtelStatusDescription, "Frontend crash"),
-						model.Int64(conventions.OtelStatusCode, int64(pdata.StatusCodeError)),
+						model.Int64(conventions.OtelStatusCode, int64(ptrace.StatusCodeError)),
 						model.Bool("error", true),
 					},
 				},
@@ -397,7 +350,7 @@ func TestSampling(t *testing.T) {
 	require.NoError(t, jr.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() { require.NoError(t, jr.Shutdown(context.Background())) })
 
-	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", config.CollectorGRPCPort), grpc.WithInsecure())
+	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", config.CollectorGRPCPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NoError(t, err)
 	defer conn.Close()
 
@@ -448,7 +401,7 @@ func TestSamplingFailsOnNotConfigured(t *testing.T) {
 	require.NoError(t, jr.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() { require.NoError(t, jr.Shutdown(context.Background())) })
 
-	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", config.CollectorGRPCPort), grpc.WithInsecure())
+	conn, err := grpc.Dial(fmt.Sprintf("localhost:%d", config.CollectorGRPCPort), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NoError(t, err)
 	defer conn.Close()
 
@@ -477,11 +430,11 @@ func TestSamplingFailsOnBadFile(t *testing.T) {
 }
 
 func TestSamplingStrategiesMutualTLS(t *testing.T) {
-	caPath := path.Join(".", "testdata", "ca.crt")
-	serverCertPath := path.Join(".", "testdata", "server.crt")
-	serverKeyPath := path.Join(".", "testdata", "server.key")
-	clientCertPath := path.Join(".", "testdata", "client.crt")
-	clientKeyPath := path.Join(".", "testdata", "client.key")
+	caPath := filepath.Join("testdata", "ca.crt")
+	serverCertPath := filepath.Join("testdata", "server.crt")
+	serverKeyPath := filepath.Join("testdata", "server.key")
+	clientCertPath := filepath.Join("testdata", "client.crt")
+	clientKeyPath := filepath.Join("testdata", "client.key")
 
 	// start gRPC server that serves sampling strategies
 	tlsCfgOpts := configtls.TLSServerSetting{
@@ -495,7 +448,7 @@ func TestSamplingStrategiesMutualTLS(t *testing.T) {
 	require.NoError(t, err)
 	server, serverAddr := initializeGRPCTestServer(t, func(s *grpc.Server) {
 		ss, serr := staticStrategyStore.NewStrategyStore(staticStrategyStore.Options{
-			StrategiesFile: path.Join(".", "testdata", "strategies.json"),
+			StrategiesFile: filepath.Join("testdata", "strategies.json"),
 		}, zap.NewNop())
 		require.NoError(t, serr)
 		api_v2.RegisterSamplingManagerServer(s, collectorSampling.NewGRPCHandler(ss))

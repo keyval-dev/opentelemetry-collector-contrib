@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package receivercreator
+package receivercreator // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/receivercreator"
 
 import (
 	"fmt"
@@ -75,6 +75,8 @@ func (obs *observerHandler) OnAdd(added []observer.Endpoint) {
 			obs.logger.Error("unable to convert endpoint to environment map", zap.String("endpoint", string(e.ID)), zap.Error(err))
 			continue
 		}
+
+		obs.logger.Debug("handling added endpoint", zap.Any("env", env))
 
 		for _, template := range obs.config.receiverTemplates {
 			if matches, err := template.rule.eval(env); err != nil {
@@ -148,6 +150,16 @@ func (obs *observerHandler) OnRemove(removed []observer.Endpoint) {
 	defer obs.Unlock()
 
 	for _, e := range removed {
+		// debug log the endpoint to improve usability
+		if ce := obs.logger.Check(zap.DebugLevel, "handling removed endpoint"); ce != nil {
+			env, err := e.Env()
+			fields := []zap.Field{zap.String("endpoint_id", string(e.ID))}
+			if err == nil {
+				fields = append(fields, zap.Any("env", env))
+			}
+			ce.Write(fields...)
+		}
+
 		for _, rcvr := range obs.receiversByEndpointID.Get(e.ID) {
 			obs.logger.Info("stopping receiver", zap.Reflect("receiver", rcvr), zap.String("endpoint_id", string(e.ID)))
 

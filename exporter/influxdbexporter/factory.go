@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package influxdbexporter
+package influxdbexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/influxdbexporter"
 
 import (
 	"context"
@@ -26,12 +26,12 @@ import (
 
 // NewFactory creates a factory for Jaeger Thrift over HTTP exporter.
 func NewFactory() component.ExporterFactory {
-	return exporterhelper.NewFactory(
+	return component.NewExporterFactory(
 		typeStr,
 		createDefaultConfig,
-		exporterhelper.WithTraces(createTraceExporter),
-		exporterhelper.WithMetrics(createMetricsExporter),
-		exporterhelper.WithLogs(createLogsExporter),
+		component.WithTracesExporter(createTraceExporter),
+		component.WithMetricsExporter(createMetricsExporter),
+		component.WithLogsExporter(createLogsExporter),
 	)
 }
 
@@ -92,8 +92,8 @@ func createDefaultConfig() config.Exporter {
 				"User-Agent": "OpenTelemetry -> Influx",
 			},
 		},
-		QueueSettings: exporterhelper.DefaultQueueSettings(),
-		RetrySettings: exporterhelper.DefaultRetrySettings(),
+		QueueSettings: exporterhelper.NewDefaultQueueSettings(),
+		RetrySettings: exporterhelper.NewDefaultRetrySettings(),
 		MetricsSchema: "telegraf-prometheus-v1",
 	}
 }

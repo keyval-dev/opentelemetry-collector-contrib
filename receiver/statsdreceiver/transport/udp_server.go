@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package transport
+package transport // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/statsdreceiver/transport"
 
 import (
 	"bytes"
@@ -70,7 +70,7 @@ func (u *udpServer) ListenAndServe(
 				u.packetConn.LocalAddr(),
 				err)
 			if netErr, ok := err.(net.Error); ok {
-				if netErr.Temporary() {
+				if netErr.Temporary() { // nolint SA1019
 					continue
 				}
 			}

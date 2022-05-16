@@ -20,23 +20,25 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
 func TestMetricTracker_Convert(t *testing.T) {
 	miSum := MetricIdentity{
-		Resource:               pdata.NewResource(),
-		InstrumentationLibrary: pdata.NewInstrumentationLibrary(),
-		MetricDataType:         pdata.MetricDataTypeSum,
+		Resource:               pcommon.NewResource(),
+		InstrumentationLibrary: pcommon.NewInstrumentationScope(),
+		MetricDataType:         pmetric.MetricDataTypeSum,
 		MetricIsMonotonic:      true,
 		MetricName:             "",
 		MetricUnit:             "",
-		Attributes:             pdata.NewAttributeMap(),
+		Attributes:             pcommon.NewMap(),
 	}
 	miIntSum := miSum
-	miIntSum.MetricValueType = pdata.MetricValueTypeInt
-	miSum.MetricValueType = pdata.MetricValueTypeDouble
+	miIntSum.MetricValueType = pmetric.NumberDataPointValueTypeInt
+	miSum.MetricValueType = pmetric.NumberDataPointValueTypeDouble
 
 	m := NewMetricTracker(context.Background(), zap.NewNop(), 0)
 
@@ -134,7 +136,7 @@ func TestMetricTracker_Convert(t *testing.T) {
 
 	t.Run("Invalid metric identity", func(t *testing.T) {
 		invalidID := miIntSum
-		invalidID.MetricDataType = pdata.MetricDataTypeGauge
+		invalidID.MetricDataType = pmetric.MetricDataTypeGauge
 		_, valid := m.Convert(MetricPoint{
 			Identity: invalidID,
 			Value: ValuePoint{
@@ -150,7 +152,7 @@ func TestMetricTracker_Convert(t *testing.T) {
 }
 
 func Test_metricTracker_removeStale(t *testing.T) {
-	currentTime := pdata.Timestamp(100)
+	currentTime := pcommon.Timestamp(100)
 	freshPoint := ValuePoint{
 		ObservedTimestamp: currentTime,
 	}
@@ -189,7 +191,7 @@ func Test_metricTracker_removeStale(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := &metricTracker{
+			tr := &MetricTracker{
 				logger:       zap.NewNop(),
 				maxStaleness: tt.fields.MaxStaleness,
 			}
@@ -213,14 +215,14 @@ func Test_metricTracker_removeStale(t *testing.T) {
 
 func Test_metricTracker_sweeper(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	sweepEvent := make(chan pdata.Timestamp)
-	closed := false
+	sweepEvent := make(chan pcommon.Timestamp)
+	closed := atomic.NewBool(false)
 
-	onSweep := func(staleBefore pdata.Timestamp) {
+	onSweep := func(staleBefore pcommon.Timestamp) {
 		sweepEvent <- staleBefore
 	}
 
-	tr := &metricTracker{
+	tr := &MetricTracker{
 		logger:       zap.NewNop(),
 		maxStaleness: 1 * time.Millisecond,
 	}
@@ -228,14 +230,14 @@ func Test_metricTracker_sweeper(t *testing.T) {
 	start := time.Now()
 	go func() {
 		tr.sweeper(ctx, onSweep)
-		closed = true
+		closed.Store(true)
 		close(sweepEvent)
 	}()
 
 	for i := 1; i <= 2; i++ {
 		staleBefore := <-sweepEvent
 		tickTime := time.Since(start) + tr.maxStaleness*time.Duration(i)
-		if closed {
+		if closed.Load() {
 			t.Fatalf("Sweeper returned prematurely.")
 		}
 
@@ -250,7 +252,7 @@ func Test_metricTracker_sweeper(t *testing.T) {
 	}
 	cancel()
 	<-sweepEvent
-	if !closed {
+	if !closed.Load() {
 		t.Errorf("Sweeper did not terminate.")
 	}
 }

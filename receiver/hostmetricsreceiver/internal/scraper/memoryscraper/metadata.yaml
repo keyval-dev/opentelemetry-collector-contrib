@@ -1,16 +1,27 @@
-name: memory
+name: hostmetricsreceiver/memory
 
-labels:
+sem_conv_version: 1.9.0
+
+attributes:
   state:
     description: Breakdown of memory usage by type.
     enum: [buffered, cached, inactive, free, slab_reclaimable, slab_unreclaimable, used]
 
 metrics:
   system.memory.usage:
+    enabled: true
     description: Bytes of memory in use.
     unit: By
-    data:
-      type: sum
+    sum:
+      value_type: int
       aggregation: cumulative
       monotonic: false
-    labels: [state]
+    attributes: [state]
+
+  system.memory.utilization:
+    enabled: false
+    description: Percentage of memory bytes in use.
+    unit: 1
+    gauge:
+      value_type: double
+    attributes: [state]

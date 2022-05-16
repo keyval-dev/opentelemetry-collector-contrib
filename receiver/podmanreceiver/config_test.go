@@ -15,7 +15,7 @@
 package podmanreceiver
 
 import (
-	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/config/configtest"
+	"go.opentelemetry.io/collector/service/servicetest"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -32,7 +32,7 @@ func TestLoadConfig(t *testing.T) {
 
 	factory := NewFactory()
 	factories.Receivers[typeStr] = factory
-	cfg, err := configtest.LoadConfigAndValidate(path.Join(".", "testdata", "config.yaml"), factories)
+	cfg, err := servicetest.LoadConfigAndValidate(filepath.Join("testdata", "config.yaml"), factories)
 
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
@@ -45,9 +45,11 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, "podman_stats", dcfg.ID().String())
 	assert.Equal(t, "unix:///run/podman/podman.sock", dcfg.Endpoint)
 	assert.Equal(t, 10*time.Second, dcfg.CollectionInterval)
+	assert.Equal(t, 5*time.Second, dcfg.Timeout)
 
 	ascfg := cfg.Receivers[config.NewComponentIDWithName(typeStr, "all")].(*Config)
 	assert.Equal(t, "podman_stats/all", ascfg.ID().String())
 	assert.Equal(t, "http://example.com/", ascfg.Endpoint)
 	assert.Equal(t, 2*time.Second, ascfg.CollectionInterval)
+	assert.Equal(t, 20*time.Second, ascfg.Timeout)
 }

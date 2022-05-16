@@ -17,19 +17,18 @@ package stanza
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/open-telemetry/opentelemetry-log-collection/entry"
 	"github.com/open-telemetry/opentelemetry-log-collection/operator"
-	"github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/transformer/noop"
 	"github.com/open-telemetry/opentelemetry-log-collection/operator/helper"
+	"github.com/open-telemetry/opentelemetry-log-collection/operator/transformer/noop"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/extension/experimental/storage"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.uber.org/zap"
 )
 
 // This file implements some useful testing components
@@ -61,14 +60,14 @@ func NewUnstartableConfig() *UnstartableConfig {
 }
 
 // Build will build an unstartable operator
-func (c *UnstartableConfig) Build(context operator.BuildContext) ([]operator.Operator, error) {
-	o, _ := c.OutputConfig.Build(context)
-	return []operator.Operator{&UnstartableOperator{OutputOperator: o}}, nil
+func (c *UnstartableConfig) Build(logger *zap.SugaredLogger) (operator.Operator, error) {
+	o, _ := c.OutputConfig.Build(logger)
+	return &UnstartableOperator{OutputOperator: o}, nil
 }
 
 // Start will return an error
 func (o *UnstartableOperator) Start(_ operator.Persister) error {
-	return fmt.Errorf("something very unusual happened")
+	return errors.New("something very unusual happened")
 }
 
 // Process will return nil
@@ -76,40 +75,13 @@ func (o *UnstartableOperator) Process(ctx context.Context, entry *entry.Entry) e
 	return nil
 }
 
-type mockLogsConsumer struct {
-	received int32
-}
-
-func (m *mockLogsConsumer) Capabilities() consumer.Capabilities {
-	return consumer.Capabilities{MutatesData: false}
-}
-
-func (m *mockLogsConsumer) ConsumeLogs(ctx context.Context, ld pdata.Logs) error {
-	atomic.AddInt32(&m.received, 1)
-	return nil
-}
-
-func (m *mockLogsConsumer) Received() int {
-	ret := atomic.LoadInt32(&m.received)
-	return int(ret)
-}
-
 type mockLogsRejecter struct {
-	rejected int32
+	consumertest.LogsSink
 }
 
-func (m *mockLogsRejecter) Capabilities() consumer.Capabilities {
-	return consumer.Capabilities{MutatesData: false}
-}
-
-func (m *mockLogsRejecter) ConsumeLogs(ctx context.Context, ld pdata.Logs) error {
-	atomic.AddInt32(&m.rejected, 1)
-	return fmt.Errorf("no")
-}
-
-func (m *mockLogsRejecter) Rejected() int {
-	ret := atomic.LoadInt32(&m.rejected)
-	return int(ret)
+func (m *mockLogsRejecter) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
+	_ = m.LogsSink.ConsumeLogs(ctx, ld)
+	return errors.New("no")
 }
 
 const testType = "test"
@@ -152,7 +124,7 @@ func (f TestReceiverType) DecodeInputConfig(cfg config.Receiver) (*operator.Conf
 
 	// Allow tests to explicitly prompt a failure
 	if testConfig.Input["type"] == "unknown" {
-		return nil, fmt.Errorf("Unknown input type")
+		return nil, errors.New("unknown input type")
 	}
 	return &operator.Config{Builder: NewUnstartableConfig()}, nil
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package fluentforwardreceiver
+package fluentforwardreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/fluentforwardreceiver"
 
 import (
 	"context"
@@ -88,6 +88,7 @@ func (r *fluentReceiver) Start(ctx context.Context, _ component.Host) error {
 }
 
 func (r *fluentReceiver) Shutdown(context.Context) error {
+	r.listener.Close()
 	r.cancel()
 	return nil
 }

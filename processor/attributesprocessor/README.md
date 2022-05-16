@@ -1,29 +1,31 @@
 # Attributes Processor
 
-Supported pipeline types: traces, logs.
+Supported pipeline types: traces, logs, metrics.
 
-The attributes processor modifies attributes of a span. Please refer to
+The attributes processor modifies attributes of a span, log, or metric. Please refer to
 [config.go](./config.go) for the config spec.
 
-It optionally supports the ability to [include/exclude spans](#includeexclude-spans).
+This processor also supports the ability to filter and match input data to determine
+if they should be [included or excluded](#includeexclude-filtering) for specified actions.
 
 It takes a list of actions which are performed in order specified in the config.
 The supported actions are:
-- `insert`: Inserts a new attribute in spans where the key does not already exist.
-- `update`: Updates an attribute in spans where the key does exist.
-- `upsert`: Performs insert or update. Inserts a new attribute in spans where the
-  key does not already exist and updates an attribute in spans where the key
+- `insert`: Inserts a new attribute in input data where the key does not already exist.
+- `update`: Updates an attribute in input data where the key does exist.
+- `upsert`: Performs insert or update. Inserts a new attribute in input data where the
+  key does not already exist and updates an attribute in input data where the key
   does exist.
-- `delete`: Deletes an attribute from a span.
+- `delete`: Deletes an attribute from the input data.
 - `hash`: Hashes (SHA1) an existing attribute value.
 - `extract`: Extracts values using a regular expression rule from the input key
   to target keys specified in the rule. If a target key already exists, it will
   be overridden. Note: It behaves similar to the Span Processor `to_attributes`
   setting with the existing attribute as the source.
+- `convert`: Converts an existing attribute to a specified type.
 
 For the actions `insert`, `update` and `upsert`,
  - `key`  is required
- - one of `value` or `from_attribute` is required
+ - one of `value`, `from_attribute` or `from_context` is required
  - `action` is required.
 ```yaml
   # Key specifies the attribute to act upon.
@@ -36,9 +38,22 @@ For the actions `insert`, `update` and `upsert`,
   # Key specifies the attribute to act upon.
 - key: <key>
   action: {insert, update, upsert}
-  # FromAttribute specifies the attribute from the span to use to populate
+  # FromAttribute specifies the attribute from the input data to use to populate
   # the value. If the attribute doesn't exist, no action is performed.
   from_attribute: <other key>
+
+  # Key specifies the attribute to act upon.
+- key: <key>
+  action: {insert, update, upsert}
+  # FromContext specifies the context value to use to populate the attribute value. 
+  # If the key is prefixed with `metadata.`, the values are searched
+  # in the receiver's transport protocol additional information like gRPC Metadata or HTTP Headers. 
+  # If the key is prefixed with `auth.`, the values are searched
+  # in the authentication information set by the server authenticator. 
+  # Refer to the server authenticator's documentation part of your pipeline for more information about which attributes are available.
+  # If the key doesn't exist, no action is performed.
+  # If the key has multiple values the values will be joined with `;` separator.
+  from_context: <other key>
 ```
 
 For the `delete` action,
@@ -77,6 +92,18 @@ For the `extract` action,
 
  ```
 
+
+For the `convert` action,
+ - `key` is required
+ - `action: convert` is required.
+ - `converted_type` is required and must be one of int, double or string
+```yaml
+# Key specifies the attribute to act upon.
+- key: <key>
+  action: convert
+  converted_type: <int|double|string>
+```
+
 The list of actions can be composed to create rich scenarios, such as
 back filling attribute, copying values to a new key, redacting sensitive information.
 The following is a sample configuration.
@@ -99,25 +126,64 @@ processors:
         action: delete
       - key: account_email
         action: hash
+      - key: http.status_code
+        action: convert
+        converted_type: int
 
 ```
 
 Refer to [config.yaml](./testdata/config.yaml) for detailed
 examples on using the processor.
 
-## Include/Exclude Spans
+### Attributes Processor for Metrics vs. [Metric Transform Processor](../metricstransformprocessor)
 
-The [attribute processor](README.md) and the [span processor](../spanprocessor/README.md) expose
-the option to provide a set of properties of a span to match against to determine
-if the span should be included or excluded from the processor. To configure
-this option, under `include` and/or `exclude` at least `match_type` and one of
-`services`, `span_names` or `attributes` is required.
+Regarding metric support, these two processors have overlapping functionality. They can both do simple modifications
+of metric attribute key-value pairs. As a general rule the attributes processor has more attribute related
+functionality, while the metrics transform processor can do much more data manipulation. The attributes processor
+is preferred when the only needed functionality is overlapping, as it natively uses the official OpenTelemetry
+data model. However, if the metric transform processor is already in use or its extra functionality is necessary,
+there's no need to migrate away from it.
+
+Shared functionality
+* Add attributes
+* Update values of attributes
+
+Attribute processor specific functionality
+* delete
+* hash
+* extract
+
+Metric transform processor specific functionality
+* Rename metrics
+* Delete data points
+* Toggle data type
+* Scale value
+* Aggregate across label sets
+* Aggregate across label values
+
+## Include/Exclude Filtering
+
+The [attribute processor](README.md) exposes
+an option to provide a set of properties of a span, log, or metric record to match against to determine
+if the input data should be included or excluded from the processor. To configure
+this option, under `include` and/or `exclude` at least `match_type` and one of the following
+is required:
+- For spans, one of `services`, `span_names`, `attributes`, `resources`, or `libraries` must be specified
+with a non-empty value for a valid configuration. The `log_bodies`, `log_severity_texts`, `expressions`, `resource_attributes` and
+`metric_names` fields are invalid.
+- For logs, one of `log_bodies`, `log_severity_texts`, `attributes`, `resources`, or `libraries` must be specified with a
+non-empty value for a valid configuration. The `span_names`, `metric_names`, `expressions`, `resource_attributes`,
+and `services` fields are invalid.
+- For metrics, one of `metric_names`, `resources` must be specified
+with a valid non-empty value for a valid configuration. The `span_names`, `log_bodies`, `log_severity_texts` and
+`services` fields are invalid.
+
 
 Note: If both `include` and `exclude` are specified, the `include` properties
 are checked before the `exclude` properties.
 
 ```yaml
-{span, attributes}:
+attributes:
     # include and/or exclude can be specified. However, the include properties
     # are always checked before the exclude properties.
     {include, exclude}:
@@ -135,13 +201,34 @@ are checked before the `exclude` properties.
         # < see "Match Configuration" below >
 
       # services specify an array of items to match the service name against.
-      # A match occurs if the span service name matches at least of the items.
+      # A match occurs if the span service name matches at least one of the items.
       # This is an optional field.
       services: [<item1>, ..., <itemN>]
+
+      # resources specify an array of items to match the resources against.
+      # A match occurs if the input data resources matches at least one of the items.
+      resources: [<item1>, ..., <itemN>]
+
+      # libraries specify an array of items to match the implementation library against.
+      # A match occurs if the input data implementation library matches at least one of the items.
+      libraries: [<item1>, ..., <itemN>]
 
       # The span name must match at least one of the items.
       # This is an optional field.
       span_names: [<item1>, ..., <itemN>]
+
+      # The log body must match at least one of the items.
+      # Currently only string body types are supported.
+      # This is an optional field.
+      log_bodies: [<item1>, ..., <itemN>]
+
+      # The log severity text must match at least one of the items.
+      # This is an optional field.
+      log_severity_texts: [<item1>, ..., <itemN>]
+
+      # The metric name must match at least one of the items.
+      # This is an optional field.
+      metric_names: [<item1>, ..., <itemN>]
 
       # Attributes specifies the list of attributes to match against.
       # All of these attributes must match exactly for a match to occur.

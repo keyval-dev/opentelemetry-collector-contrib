@@ -21,8 +21,9 @@ import (
 	"github.com/jaegertracing/jaeger/thrift-gen/jaeger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testdata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/tracetranslator"
@@ -61,14 +62,14 @@ func TestJThriftTagsToInternalAttributes(t *testing.T) {
 		},
 	}
 
-	expected := pdata.NewAttributeMap()
+	expected := pcommon.NewMap()
 	expected.InsertBool("bool-val", true)
 	expected.InsertInt("int-val", 123)
 	expected.InsertString("string-val", "abc")
 	expected.InsertDouble("double-val", 1.23)
 	expected.InsertString("binary-val", "AAAAAABkfZg=")
 
-	got := pdata.NewAttributeMap()
+	got := pcommon.NewMap()
 	jThriftTagsToInternalAttributes(tags, got)
 
 	require.EqualValues(t, expected, got)
@@ -79,12 +80,12 @@ func TestThriftBatchToInternalTraces(t *testing.T) {
 	tests := []struct {
 		name string
 		jb   *jaeger.Batch
-		td   pdata.Traces
+		td   ptrace.Traces
 	}{
 		{
 			name: "empty",
 			jb:   &jaeger.Batch{},
-			td:   pdata.NewTraces(),
+			td:   ptrace.NewTraces(),
 		},
 
 		{
@@ -129,7 +130,8 @@ func TestThriftBatchToInternalTraces(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			td := ThriftBatchToInternalTraces(test.jb)
+			td, err := ThriftToTraces(test.jb)
+			assert.NoError(t, err)
 			assert.EqualValues(t, test.td, td)
 		})
 	}
@@ -155,7 +157,7 @@ func generateThriftSpan() *jaeger.Span {
 	intAttrVal := int64(123)
 	eventName := "event-with-attr"
 	eventStrAttrVal := "span-event-attr-val"
-	statusCode := int64(pdata.StatusCodeError)
+	statusCode := statusError
 	statusMsg := "status-cancelled"
 	kind := string(tracetranslator.OpenTracingSpanKindClient)
 
@@ -196,8 +198,8 @@ func generateThriftSpan() *jaeger.Span {
 		Tags: []*jaeger.Tag{
 			{
 				Key:   conventions.OtelStatusCode,
-				VType: jaeger.TagType_LONG,
-				VLong: &statusCode,
+				VType: jaeger.TagType_STRING,
+				VStr:  &statusCode,
 			},
 			{
 				Key:   conventions.OtelStatusDescription,
@@ -243,7 +245,7 @@ func generateThriftChildSpan() *jaeger.Span {
 }
 
 func generateThriftFollowerSpan() *jaeger.Span {
-	statusCode := int64(pdata.StatusCodeOk)
+	statusCode := statusOk
 	statusMsg := "status-ok"
 	kind := string(tracetranslator.OpenTracingSpanKindConsumer)
 
@@ -257,8 +259,8 @@ func generateThriftFollowerSpan() *jaeger.Span {
 		Tags: []*jaeger.Tag{
 			{
 				Key:   conventions.OtelStatusCode,
-				VType: jaeger.TagType_LONG,
-				VLong: &statusCode,
+				VType: jaeger.TagType_STRING,
+				VStr:  &statusCode,
 			},
 			{
 				Key:   conventions.OtelStatusDescription,
@@ -282,7 +284,7 @@ func generateThriftFollowerSpan() *jaeger.Span {
 	}
 }
 
-func unixNanoToMicroseconds(ns pdata.Timestamp) int64 {
+func unixNanoToMicroseconds(ns pcommon.Timestamp) int64 {
 	return int64(ns / 1000)
 }
 
@@ -297,6 +299,7 @@ func BenchmarkThriftBatchToInternalTraces(b *testing.B) {
 
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		ThriftBatchToInternalTraces(jb)
+		_, err := ThriftToTraces(jb)
+		assert.NoError(b, err)
 	}
 }

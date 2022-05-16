@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package prometheusremotewriteexporter
+package prometheusremotewriteexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter"
 
 import (
 	"fmt"
@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/service/featuregate"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/resourcetotelemetry"
 )
@@ -29,6 +30,7 @@ type Config struct {
 	config.ExporterSettings        `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct
 	exporterhelper.TimeoutSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
 	exporterhelper.RetrySettings   `mapstructure:"retry_on_failure"`
+	sanitizeLabel                  bool
 
 	// prefix attached to each exported metric name
 	// See: https://prometheus.io/docs/practices/naming/#metric-names
@@ -47,17 +49,32 @@ type Config struct {
 	// "Enabled" - A boolean field to enable/disable this option. Default is `false`.
 	// If enabled, all the resource attributes will be converted to metric labels by default.
 	ResourceToTelemetrySettings resourcetotelemetry.Settings `mapstructure:"resource_to_telemetry_conversion"`
+	WAL                         *WALConfig                   `mapstructure:"wal"`
 }
 
 // RemoteWriteQueue allows to configure the remote write queue.
 type RemoteWriteQueue struct {
+	// Enabled if false the queue is not enabled, the export requests
+	// are executed synchronously.
+	Enabled bool `mapstructure:"enabled"`
+
 	// QueueSize is the maximum number of OTLP metric batches allowed
-	// in the queue at a given time.
+	// in the queue at a given time. Ignored if Enabled is false.
 	QueueSize int `mapstructure:"queue_size"`
 
 	// NumWorkers configures the number of workers used by
 	// the collector to fan out remote write requests.
 	NumConsumers int `mapstructure:"num_consumers"`
+}
+
+var dropSanitizationGate = featuregate.Gate{
+	ID:          "exporter.prometheusremotewrite.PermissiveLabelSanitization",
+	Enabled:     false,
+	Description: "Controls whether to change labels starting with '_' to 'key_'",
+}
+
+func init() {
+	featuregate.GetRegistry().MustRegister(dropSanitizationGate)
 }
 
 // TODO(jbd): Add capacity, max_samples_per_send to QueueConfig.
@@ -69,6 +86,11 @@ func (cfg *Config) Validate() error {
 	if cfg.RemoteWriteQueue.QueueSize < 0 {
 		return fmt.Errorf("remote write queue size can't be negative")
 	}
+
+	if cfg.RemoteWriteQueue.Enabled && cfg.RemoteWriteQueue.QueueSize == 0 {
+		return fmt.Errorf("a 0 size queue will drop all the data")
+	}
+
 	if cfg.RemoteWriteQueue.NumConsumers < 0 {
 		return fmt.Errorf("remote write consumer number can't be negative")
 	}

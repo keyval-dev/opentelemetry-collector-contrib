@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package redisreceiver
+package redisreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/redisreceiver"
 
 import (
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/receiver/scraperhelper"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/redisreceiver/internal/metadata"
 )
 
 type Config struct {
@@ -33,4 +35,6 @@ type Config struct {
 	Password string `mapstructure:"password"`
 
 	TLS configtls.TLSClientSetting `mapstructure:"tls,omitempty"`
+
+	Metrics metadata.MetricsSettings `mapstructure:"metrics"`
 }

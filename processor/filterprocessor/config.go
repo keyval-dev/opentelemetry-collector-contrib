@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filterprocessor
+package filterprocessor // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor"
 
 import (
 	"go.opentelemetry.io/collector/config"
@@ -56,11 +56,11 @@ type LogFilters struct {
 	Exclude *LogMatchProperties `mapstructure:"exclude"`
 }
 
-// LogMatchType specifies the strategy for matching against `pdata.Log`s.
+// LogMatchType specifies the strategy for matching against `plog.Log`s.
 type LogMatchType string
 
 // These are the MatchTypes that users can specify for filtering
-// `pdata.Log`s.
+// `plog.Log`s.
 const (
 	Strict = LogMatchType(filterset.Strict)
 	Regexp = LogMatchType(filterset.Regexp)

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package signalfxreceiver
+// nolint:errcheck
+package signalfxreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/signalfxreceiver"
 
 import (
 	"compress/gzip"
@@ -32,12 +33,14 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenterror"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 	"go.opentelemetry.io/collector/obsreport"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/signalfx"
 )
 
 const (
@@ -74,16 +77,18 @@ var (
 	errNextConsumerRespBody  = initJSONResponse(responseErrNextConsumer)
 	errLogsNotConfigured     = initJSONResponse(responseErrLogsNotConfigured)
 	errMetricsNotConfigured  = initJSONResponse(responseErrMetricsNotConfigured)
+
+	translator = &signalfx.ToTranslator{}
 )
 
 // sfxReceiver implements the component.MetricsReceiver for SignalFx metric protocol.
 type sfxReceiver struct {
-	sync.Mutex
 	settings        component.ReceiverCreateSettings
 	config          *Config
 	metricsConsumer consumer.Metrics
 	logsConsumer    consumer.Logs
 	server          *http.Server
+	shutdownWG      sync.WaitGroup
 	obsrecv         *obsreport.Receiver
 }
 
@@ -112,16 +117,10 @@ func newReceiver(
 }
 
 func (r *sfxReceiver) RegisterMetricsConsumer(mc consumer.Metrics) {
-	r.Lock()
-	defer r.Unlock()
-
 	r.metricsConsumer = mc
 }
 
 func (r *sfxReceiver) RegisterLogsConsumer(lc consumer.Logs) {
-	r.Lock()
-	defer r.Unlock()
-
 	r.logsConsumer = lc
 }
 
@@ -129,9 +128,6 @@ func (r *sfxReceiver) RegisterLogsConsumer(lc consumer.Logs) {
 // By convention the consumer of the received data is set when the receiver
 // instance is created.
 func (r *sfxReceiver) Start(_ context.Context, host component.Host) error {
-	r.Lock()
-	defer r.Unlock()
-
 	if r.metricsConsumer == nil && r.logsConsumer == nil {
 		return componenterror.ErrNilNextConsumer
 	}
@@ -146,15 +142,20 @@ func (r *sfxReceiver) Start(_ context.Context, host component.Host) error {
 	mx.HandleFunc("/v2/datapoint", r.handleDatapointReq)
 	mx.HandleFunc("/v2/event", r.handleEventReq)
 
-	r.server = r.config.HTTPServerSettings.ToServer(mx, r.settings.TelemetrySettings)
+	r.server, err = r.config.HTTPServerSettings.ToServer(host, r.settings.TelemetrySettings, mx)
+	if err != nil {
+		return err
+	}
 
 	// TODO: Evaluate what properties should be configurable, for now
 	//		set some hard-coded values.
 	r.server.ReadHeaderTimeout = defaultServerTimeout
 	r.server.WriteTimeout = defaultServerTimeout
 
+	r.shutdownWG.Add(1)
 	go func() {
-		if errHTTP := r.server.Serve(ln); errHTTP != http.ErrServerClosed {
+		defer r.shutdownWG.Done()
+		if errHTTP := r.server.Serve(ln); !errors.Is(errHTTP, http.ErrServerClosed) && errHTTP != nil {
 			host.ReportFatalError(errHTTP)
 		}
 	}()
@@ -164,10 +165,9 @@ func (r *sfxReceiver) Start(_ context.Context, host component.Host) error {
 // Shutdown tells the receiver that should stop reception,
 // giving it a chance to perform any necessary clean-up.
 func (r *sfxReceiver) Shutdown(context.Context) error {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.server.Close()
+	err := r.server.Close()
+	r.shutdownWG.Wait()
+	return err
 }
 
 func (r *sfxReceiver) readBody(ctx context.Context, resp http.ResponseWriter, req *http.Request) ([]byte, bool) {
@@ -240,24 +240,23 @@ func (r *sfxReceiver) handleDatapointReq(resp http.ResponseWriter, req *http.Req
 		return
 	}
 
-	md, _ := signalFxV2ToMetrics(r.settings.Logger, msg.Datapoints)
+	md, err := translator.ToMetrics(msg.Datapoints)
+	if err != nil {
+		r.settings.Logger.Debug("SignalFx conversion error", zap.Error(err))
+	}
 
 	if r.config.AccessTokenPassthrough {
 		if accessToken := req.Header.Get(splunk.SFxAccessTokenHeader); accessToken != "" {
 			for i := 0; i < md.ResourceMetrics().Len(); i++ {
 				rm := md.ResourceMetrics().At(i)
 				res := rm.Resource()
-				res.Attributes().Insert(splunk.SFxAccessTokenLabel, pdata.NewAttributeValueString(accessToken))
+				res.Attributes().Insert(splunk.SFxAccessTokenLabel, pcommon.NewValueString(accessToken))
 			}
 		}
 	}
 
-	err := r.metricsConsumer.ConsumeMetrics(ctx, md)
-	r.obsrecv.EndMetricsOp(
-		ctx,
-		typeStr,
-		len(msg.Datapoints),
-		err)
+	err = r.metricsConsumer.ConsumeMetrics(ctx, md)
+	r.obsrecv.EndMetricsOp(ctx, typeStr, len(msg.Datapoints), err)
 
 	r.writeResponse(ctx, resp, err)
 }
@@ -287,10 +286,10 @@ func (r *sfxReceiver) handleEventReq(resp http.ResponseWriter, req *http.Request
 		return
 	}
 
-	ld := pdata.NewLogs()
+	ld := plog.NewLogs()
 	rl := ld.ResourceLogs().AppendEmpty()
-	ill := rl.InstrumentationLibraryLogs().AppendEmpty()
-	signalFxV2EventsToLogRecords(msg.Events, ill.Logs())
+	sl := rl.ScopeLogs().AppendEmpty()
+	signalFxV2EventsToLogRecords(msg.Events, sl.LogRecords())
 
 	if r.config.AccessTokenPassthrough {
 		if accessToken := req.Header.Get(splunk.SFxAccessTokenHeader); accessToken != "" {

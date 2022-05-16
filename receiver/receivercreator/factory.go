@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package receivercreator
+package receivercreator // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/receivercreator"
 
 import (
 	"context"
@@ -20,8 +20,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
-	"go.opentelemetry.io/collector/receiver/receiverhelper"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/observer"
 )
@@ -34,10 +33,10 @@ const (
 
 // NewFactory creates a factory for receiver creator.
 func NewFactory() component.ReceiverFactory {
-	return receiverhelper.NewFactory(
+	return component.NewReceiverFactory(
 		typeStr,
 		createDefaultConfig,
-		receiverhelper.WithMetrics(createMetricsReceiver))
+		component.WithMetricsReceiver(createMetricsReceiver))
 }
 
 func createDefaultConfig() config.Receiver {
@@ -53,6 +52,14 @@ func createDefaultConfig() config.Receiver {
 				conventions.AttributeK8SPodName:       "`pod.name`",
 				conventions.AttributeK8SPodUID:        "`pod.uid`",
 				conventions.AttributeK8SNamespaceName: "`pod.namespace`",
+			},
+			observer.ContainerType: map[string]string{
+				conventions.AttributeContainerName:      "`name`",
+				conventions.AttributeContainerImageName: "`image`",
+			},
+			observer.K8sNodeType: map[string]string{
+				conventions.AttributeK8SNodeName: "`name`",
+				conventions.AttributeK8SNodeUID:  "`uid`",
 			},
 		},
 		receiverTemplates: map[string]receiverTemplate{},

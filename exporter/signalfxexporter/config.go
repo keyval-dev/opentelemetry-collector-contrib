@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package signalfxexporter
+package signalfxexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter"
 
 import (
 	"errors"
@@ -201,5 +201,14 @@ func (cfg *Config) Unmarshal(componentParser *config.Map) (err error) {
 		return err
 	}
 
+	return nil
+}
+
+// Validate checks if the exporter configuration is valid.
+// TODO: Move other validations here.
+func (cfg *Config) Validate() error {
+	if err := cfg.QueueSettings.Validate(); err != nil {
+		return fmt.Errorf("sending_queue settings has invalid configuration: %w", err)
+	}
 	return nil
 }

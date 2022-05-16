@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package honeycombexporter
+package honeycombexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/honeycombexporter"
 
 import (
+	"fmt"
+
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 )
@@ -38,4 +40,11 @@ type Config struct {
 	exporterhelper.RetrySettings `mapstructure:"retry_on_failure"`
 	// QueueSettings enable queued processing
 	exporterhelper.QueueSettings `mapstructure:"sending_queue"`
+}
+
+func (cfg *Config) Validate() error {
+	if err := cfg.QueueSettings.Validate(); err != nil {
+		return fmt.Errorf("`sending_queue` settings has invalid configuration: %w", err)
+	}
+	return nil
 }

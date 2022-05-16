@@ -16,11 +16,11 @@ package traces
 
 import (
 	"fmt"
+	"log"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/service/defaultcomponents"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/correctnesstests"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/testbed"
@@ -62,11 +62,12 @@ func testWithTracingGoldenDataset(
 		"../../../internal/coreinternal/goldendataset/testdata/generated_pict_pairs_traces.txt",
 		"../../../internal/coreinternal/goldendataset/testdata/generated_pict_pairs_spans.txt",
 		"")
-	factories, err := defaultcomponents.Components()
+	factories, err := testbed.Components()
 	require.NoError(t, err, "default components resulted in: %v", err)
 	runner := testbed.NewInProcessCollector(factories)
 	validator := testbed.NewCorrectTestValidator(sender.ProtocolName(), receiver.ProtocolName(), dataProvider)
 	config := correctnesstests.CreateConfigYaml(sender, receiver, processors, "traces")
+	log.Println(config)
 	configCleanup, cfgErr := runner.PrepareConfig(config)
 	require.NoError(t, cfgErr, "collector configuration resulted in: %v", cfgErr)
 	defer configCleanup()
@@ -84,20 +85,19 @@ func testWithTracingGoldenDataset(
 
 	tc.EnableRecording()
 	tc.StartBackend()
-	tc.StartAgent("--metrics-level=NONE")
+	tc.StartAgent()
 
 	tc.StartLoad(testbed.LoadOptions{
 		DataItemsPerSecond: 1024,
 		ItemsPerBatch:      1,
 	})
 
-	duration := time.Second
-	tc.Sleep(duration)
+	tc.Sleep(2 * time.Second)
 
 	tc.StopLoad()
 
 	tc.WaitForN(func() bool { return tc.LoadGenerator.DataItemsSent() == tc.MockBackend.DataItemsReceived() },
-		duration*3, "all data items received")
+		3*time.Second, "all data items received")
 
 	tc.StopAgent()
 

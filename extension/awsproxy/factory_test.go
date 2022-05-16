@@ -22,8 +22,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
@@ -31,7 +33,7 @@ import (
 	"go.opentelemetry.io/collector/config/configtest"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/proxy"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testutil"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 )
 
 func TestFactory_CreateDefaultConfig(t *testing.T) {
@@ -81,10 +83,14 @@ func TestFactory_CreateExtension(t *testing.T) {
 	err = ext.Start(ctx, mh)
 	assert.NoError(t, err)
 
-	resp, err := http.Post(
-		"http://"+address+"/GetSamplingRules",
-		"application/json",
-		strings.NewReader(`{"NextToken": null}`))
+	var resp *http.Response
+	require.Eventually(t, func() bool {
+		resp, err = http.Post(
+			"http://"+address+"/GetSamplingRules",
+			"application/json",
+			strings.NewReader(`{"NextToken": null}`))
+		return err == nil
+	}, 3*time.Second, 10*time.Millisecond)
 
 	assert.NoError(t, err)
 

@@ -15,22 +15,38 @@
 package redisreceiver
 
 import (
-	"strings"
+	"reflect"
+	"runtime"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/model/pdata"
+	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/redisreceiver/internal/metadata"
 )
 
-func TestDefaultMetrics(t *testing.T) {
-	for _, metric := range getDefaultRedisMetrics() {
-		require.True(t, len(metric.key) > 0)
-		require.True(t, len(metric.name) > 0)
-		require.True(t, strings.HasPrefix(metric.name, "redis."))
-		require.True(
-			t,
-			metric.pdType == pdata.MetricDataTypeSum ||
-				metric.pdType == pdata.MetricDataTypeGauge,
-		)
+func TestDataPointRecorders(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	settings := componenttest.NewNopReceiverCreateSettings()
+	settings.Logger = logger
+	rs := &redisScraper{
+		redisSvc: newRedisSvc(newFakeClient()),
+		settings: settings,
+		mb:       metadata.NewMetricsBuilder(Config{}.Metrics),
+	}
+	metricByRecorder := map[string]string{}
+	for metric, recorder := range rs.dataPointRecorders() {
+		switch recorder.(type) {
+		case func(pcommon.Timestamp, int64), func(pcommon.Timestamp, float64):
+			recorderName := runtime.FuncForPC(reflect.ValueOf(recorder).Pointer()).Name()
+			if m, ok := metricByRecorder[recorderName]; ok {
+				assert.Failf(t, "shared-recorder", "Metrics %q and %q share the same recorder", metric, m)
+			}
+			metricByRecorder[recorderName] = metric
+		default:
+			assert.Failf(t, "invalid-recorder", "Metric %q has invalid recorder type", metric)
+		}
 	}
 }

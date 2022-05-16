@@ -15,17 +15,14 @@
 //go:build !linux && !windows
 // +build !linux,!windows
 
-package processscraper
+package processscraper // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/processscraper"
 
 import (
-	"github.com/shirou/gopsutil/cpu"
-	"go.opentelemetry.io/collector/model/pdata"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 )
 
-const cpuStatesLen = 0
-
-func appendCPUTimeStateDataPoints(ddps pdata.NumberDataPointSlice, startTime, now pdata.Timestamp, cpuTime *cpu.TimesStat) {
-}
+func (s *scraper) recordCPUTimeMetric(now pcommon.Timestamp, cpuTime *cpu.TimesStat) {}
 
 func getProcessExecutable(processHandle) (*executableMetadata, error) {
 	return nil, nil

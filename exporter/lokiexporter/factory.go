@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package lokiexporter
+package lokiexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/lokiexporter"
 
 import (
 	"context"
@@ -28,10 +28,10 @@ const typeStr = "loki"
 
 // NewFactory creates a factory for Loki exporter.
 func NewFactory() component.ExporterFactory {
-	return exporterhelper.NewFactory(
+	return component.NewExporterFactory(
 		typeStr,
 		createDefaultConfig,
-		exporterhelper.WithLogs(createLogsExporter),
+		component.WithLogsExporter(createLogsExporter),
 	)
 }
 
@@ -45,9 +45,10 @@ func createDefaultConfig() config.Exporter {
 			// We almost read 0 bytes, so no need to tune ReadBufferSize.
 			WriteBufferSize: 512 * 1024,
 		},
-		RetrySettings: exporterhelper.DefaultRetrySettings(),
-		QueueSettings: exporterhelper.DefaultQueueSettings(),
+		RetrySettings: exporterhelper.NewDefaultRetrySettings(),
+		QueueSettings: exporterhelper.NewDefaultQueueSettings(),
 		TenantID:      "",
+		Format:        "body",
 		Labels: LabelsConfig{
 			Attributes:         map[string]string{},
 			ResourceAttributes: map[string]string{},
@@ -62,7 +63,7 @@ func createLogsExporter(_ context.Context, set component.ExporterCreateSettings,
 		return nil, err
 	}
 
-	exp := newExporter(expCfg, set.Logger)
+	exp := newExporter(expCfg, set.TelemetrySettings)
 
 	return exporterhelper.NewLogsExporter(
 		expCfg,

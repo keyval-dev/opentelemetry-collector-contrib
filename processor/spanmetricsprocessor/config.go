@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package spanmetricsprocessor
+package spanmetricsprocessor // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanmetricsprocessor"
 
 import (
 	"time"
 
 	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/service/featuregate"
+)
+
+const (
+	delta      = "AGGREGATION_TEMPORALITY_DELTA"
+	cumulative = "AGGREGATION_TEMPORALITY_CUMULATIVE"
 )
 
 // Dimension defines the dimension name and optional default value if the Dimension is missing from a span attribute.
@@ -45,4 +52,29 @@ type Config struct {
 	// The dimensions will be fetched from the span's attributes. Examples of some conventionally used attributes:
 	// https://github.com/open-telemetry/opentelemetry-collector/blob/main/model/semconv/opentelemetry.go.
 	Dimensions []Dimension `mapstructure:"dimensions"`
+
+	// DimensionsCacheSize defines the size of cache for storing Dimensions, which helps to avoid cache memory growing
+	// indefinitely over the lifetime of the collector.
+	// Optional. See defaultDimensionsCacheSize in processor.go for the default value.
+	DimensionsCacheSize int `mapstructure:"dimensions_cache_size"`
+
+	AggregationTemporality string `mapstructure:"aggregation_temporality"`
+
+	// skipSanitizeLabel if enabled, labels that start with _ are not sanitized
+	skipSanitizeLabel bool
+}
+
+var dropSanitizationGate = featuregate.Gate{
+	ID:          "processor.spanmetrics.PermissiveLabelSanitization",
+	Enabled:     false,
+	Description: "Controls whether to change labels starting with '_' to 'key_'",
+}
+
+// GetAggregationTemporality converts the string value given in the config into a MetricAggregationTemporality.
+// Returns cumulative, unless delta is correctly specified.
+func (c Config) GetAggregationTemporality() pmetric.MetricAggregationTemporality {
+	if c.AggregationTemporality == delta {
+		return pmetric.MetricAggregationTemporalityDelta
+	}
+	return pmetric.MetricAggregationTemporalityCumulative
 }

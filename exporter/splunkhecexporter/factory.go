@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package splunkhecexporter
+package splunkhecexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/splunkhecexporter"
 
 import (
 	"context"
@@ -21,10 +21,12 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchperresourceattr"
 )
 
 const (
@@ -34,27 +36,43 @@ const (
 	defaultHTTPTimeout = 10 * time.Second
 )
 
+// TODO: Find a place for this to be shared.
+type baseMetricsExporter struct {
+	component.Component
+	consumer.Metrics
+}
+
+// TODO: Find a place for this to be shared.
+type baseLogsExporter struct {
+	component.Component
+	consumer.Logs
+}
+
 // NewFactory creates a factory for Splunk HEC exporter.
 func NewFactory() component.ExporterFactory {
-	return exporterhelper.NewFactory(
+	return component.NewExporterFactory(
 		typeStr,
 		createDefaultConfig,
-		exporterhelper.WithTraces(createTracesExporter),
-		exporterhelper.WithMetrics(createMetricsExporter),
-		exporterhelper.WithLogs(createLogsExporter))
+		component.WithTracesExporter(createTracesExporter),
+		component.WithMetricsExporter(createMetricsExporter),
+		component.WithLogsExporter(createLogsExporter))
 }
 
 func createDefaultConfig() config.Exporter {
 	return &Config{
-		ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+		LogDataEnabled:       true,
+		ProfilingDataEnabled: true,
+		ExporterSettings:     config.NewExporterSettings(config.NewComponentID(typeStr)),
 		TimeoutSettings: exporterhelper.TimeoutSettings{
 			Timeout: defaultHTTPTimeout,
 		},
-		RetrySettings:        exporterhelper.DefaultRetrySettings(),
-		QueueSettings:        exporterhelper.DefaultQueueSettings(),
-		DisableCompression:   false,
-		MaxConnections:       defaultMaxIdleCons,
-		MaxContentLengthLogs: maxContentLengthLogsLimit,
+		RetrySettings:           exporterhelper.NewDefaultRetrySettings(),
+		QueueSettings:           exporterhelper.NewDefaultQueueSettings(),
+		DisableCompression:      false,
+		MaxConnections:          defaultMaxIdleCons,
+		MaxContentLengthLogs:    maxContentLengthLogsLimit,
+		MaxContentLengthMetrics: maxContentLengthMetricsLimit,
+		MaxContentLengthTraces:  maxContentLengthTracesLimit,
 		HecToOtelAttrs: splunk.HecToOtelAttrs{
 			Source:     splunk.DefaultSourceLabel,
 			SourceType: splunk.DefaultSourceTypeLabel,
@@ -112,7 +130,7 @@ func createMetricsExporter(
 		return nil, err
 	}
 
-	return exporterhelper.NewMetricsExporter(
+	exporter, err := exporterhelper.NewMetricsExporter(
 		expCfg,
 		set,
 		exp.pushMetricsData,
@@ -122,6 +140,16 @@ func createMetricsExporter(
 		exporterhelper.WithQueue(expCfg.QueueSettings),
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.stop))
+	if err != nil {
+		return nil, err
+	}
+
+	wrapped := &baseMetricsExporter{
+		Component: exporter,
+		Metrics:   batchperresourceattr.NewBatchPerResourceMetrics(splunk.HecTokenLabel, exporter),
+	}
+
+	return wrapped, nil
 }
 
 func createLogsExporter(
@@ -140,7 +168,7 @@ func createLogsExporter(
 		return nil, err
 	}
 
-	return exporterhelper.NewLogsExporter(
+	logsExporter, err := exporterhelper.NewLogsExporter(
 		expCfg,
 		set,
 		exp.pushLogData,
@@ -150,4 +178,15 @@ func createLogsExporter(
 		exporterhelper.WithQueue(expCfg.QueueSettings),
 		exporterhelper.WithStart(exp.start),
 		exporterhelper.WithShutdown(exp.stop))
+
+	if err != nil {
+		return nil, err
+	}
+
+	wrapped := &baseLogsExporter{
+		Component: logsExporter,
+		Logs:      batchperresourceattr.NewBatchPerResourceLogs(splunk.HecTokenLabel, logsExporter),
+	}
+
+	return wrapped, nil
 }

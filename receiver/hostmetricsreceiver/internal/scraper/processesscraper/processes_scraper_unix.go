@@ -15,10 +15,12 @@
 //go:build linux || darwin || freebsd || openbsd
 // +build linux darwin freebsd openbsd
 
-package processesscraper
+package processesscraper // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/processesscraper"
 
 import (
 	"runtime"
+
+	"github.com/shirou/gopsutil/v3/process"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/processesscraper/internal/metadata"
 )
@@ -32,18 +34,18 @@ func (s *scraper) getProcessesMetadata() (processesMetadata, error) {
 		return processesMetadata{}, err
 	}
 
-	countByStatus := map[string]int64{}
+	countByStatus := map[metadata.AttributeStatus]int64{}
 	for _, process := range processes {
-		var status string
+		var status []string
 		status, err = process.Status()
 		if err != nil {
 			// We expect an error in the case that a process has
 			// been terminated as we run this code.
 			continue
 		}
-		state, ok := charToState[status]
+		state, ok := toAttributeStatus(status)
 		if !ok {
-			countByStatus[metadata.LabelStatus.Unknown]++
+			countByStatus[metadata.AttributeStatusUnknown]++
 			continue
 		}
 		countByStatus[state]++
@@ -63,15 +65,15 @@ func (s *scraper) getProcessesMetadata() (processesMetadata, error) {
 		procsCreated = &v
 	}
 
-	countByStatus[metadata.LabelStatus.Blocked] = int64(miscStat.ProcsBlocked)
-	countByStatus[metadata.LabelStatus.Running] = int64(miscStat.ProcsRunning)
+	countByStatus[metadata.AttributeStatusBlocked] = int64(miscStat.ProcsBlocked)
+	countByStatus[metadata.AttributeStatusRunning] = int64(miscStat.ProcsRunning)
 
 	totalKnown := int64(0)
 	for _, count := range countByStatus {
 		totalKnown += count
 	}
 	if int64(miscStat.ProcsTotal) > totalKnown {
-		countByStatus[metadata.LabelStatus.Unknown] = int64(miscStat.ProcsTotal) - totalKnown
+		countByStatus[metadata.AttributeStatusUnknown] = int64(miscStat.ProcsTotal) - totalKnown
 	}
 
 	return processesMetadata{
@@ -80,15 +82,25 @@ func (s *scraper) getProcessesMetadata() (processesMetadata, error) {
 	}, nil
 }
 
-var charToState = map[string]string{
-	"A": metadata.LabelStatus.Daemon,
-	"D": metadata.LabelStatus.Blocked,
-	"E": metadata.LabelStatus.Detached,
-	"O": metadata.LabelStatus.Orphan,
-	"R": metadata.LabelStatus.Running,
-	"S": metadata.LabelStatus.Sleeping,
-	"T": metadata.LabelStatus.Stopped,
-	"W": metadata.LabelStatus.Paging,
-	"Y": metadata.LabelStatus.System,
-	"Z": metadata.LabelStatus.Zombies,
+func toAttributeStatus(status []string) (metadata.AttributeStatus, bool) {
+	if len(status) == 0 || len(status[0]) == 0 {
+		return metadata.AttributeStatus(0), false
+	}
+	state, ok := charToState[status[0]]
+	return state, ok
+}
+
+var charToState = map[string]metadata.AttributeStatus{
+	process.Blocked:  metadata.AttributeStatusBlocked,
+	process.Daemon:   metadata.AttributeStatusDaemon,
+	process.Detached: metadata.AttributeStatusDetached,
+	process.Idle:     metadata.AttributeStatusIdle,
+	process.Lock:     metadata.AttributeStatusLocked,
+	process.Orphan:   metadata.AttributeStatusOrphan,
+	process.Running:  metadata.AttributeStatusRunning,
+	process.Sleep:    metadata.AttributeStatusSleeping,
+	process.Stop:     metadata.AttributeStatusStopped,
+	process.System:   metadata.AttributeStatusSystem,
+	process.Wait:     metadata.AttributeStatusPaging,
+	process.Zombie:   metadata.AttributeStatusZombies,
 }

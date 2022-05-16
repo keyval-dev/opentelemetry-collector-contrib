@@ -15,7 +15,7 @@
 //go:build windows
 // +build windows
 
-package pagingscraper
+package pagingscraper // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/pagingscraper"
 
 import (
 	"sync"
@@ -89,6 +89,7 @@ func pEnumPageFileCallbackW(pageFiles *[]*pageFileStats, enumPageFileInfo *enumP
 		deviceName: pageFileName,
 		usedBytes:  enumPageFileInfo.totalInUse * pageSize,
 		freeBytes:  (enumPageFileInfo.totalSize - enumPageFileInfo.totalInUse) * pageSize,
+		totalBytes: enumPageFileInfo.totalSize * pageSize,
 	}
 
 	*pageFiles = append(*pageFiles, pfData)

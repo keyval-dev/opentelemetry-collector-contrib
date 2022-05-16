@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package awsprometheusremotewriteexporter provides a Prometheus Remote Write Exporter with AWS Sigv4 authentication
-package awsprometheusremotewriteexporter
+package awsprometheusremotewriteexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsprometheusremotewriteexporter"
 
 import (
 	"context"
@@ -47,6 +47,7 @@ func (af *awsFactory) Type() config.Type {
 
 func (af *awsFactory) CreateMetricsExporter(ctx context.Context, params component.ExporterCreateSettings,
 	cfg config.Exporter) (component.MetricsExporter, error) {
+	params.Logger.Warn("Deprecation notice: The AWS PRW Exporter will be removed in the near future, see the README and the CHANGELOG for more information.")
 	return af.ExporterFactory.CreateMetricsExporter(ctx, params, &cfg.(*Config).Config)
 }
 

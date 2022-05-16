@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint:errcheck
 package octrace
 
 import (
@@ -36,6 +37,7 @@ import (
 	"go.opentelemetry.io/collector/obsreport/obsreporttest"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testdata"
@@ -346,7 +348,7 @@ func TestExportProtocolConformation_spansInFirstMessage(t *testing.T) {
 
 // Helper functions from here on below
 func makeTraceServiceClient(addr net.Addr) (agenttracepb.TraceService_ExportClient, func(), error) {
-	cc, err := grpc.Dial(addr.String(), grpc.WithInsecure(), grpc.WithBlock())
+	cc, err := grpc.Dial(addr.String(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 	if err != nil {
 		return nil, nil, err
 	}

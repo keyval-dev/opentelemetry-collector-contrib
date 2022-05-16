@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simpleprometheusreceiver
+package simpleprometheusreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/simpleprometheusreceiver"
 
 import (
 	"context"
@@ -90,6 +90,12 @@ func getPrometheusConfig(cfg *Config) (*prometheusreceiver.Config, error) {
 
 	httpConfig.BearerToken = configutil.Secret(bearerToken)
 
+	labels := make(model.LabelSet, len(cfg.Labels)+1)
+	for k, v := range cfg.Labels {
+		labels[model.LabelName(k)] = model.LabelValue(v)
+	}
+	labels[model.AddressLabel] = model.LabelValue(cfg.Endpoint)
+
 	scrapeConfig := &config.ScrapeConfig{
 		ScrapeInterval:  model.Duration(cfg.CollectionInterval),
 		ScrapeTimeout:   model.Duration(cfg.CollectionInterval),
@@ -102,7 +108,7 @@ func getPrometheusConfig(cfg *Config) (*prometheusreceiver.Config, error) {
 			&discovery.StaticConfig{
 				{
 					Targets: []model.LabelSet{
-						{model.AddressLabel: model.LabelValue(cfg.Endpoint)},
+						labels,
 					},
 				},
 			},

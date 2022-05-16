@@ -1,0 +1,43 @@
+name: prometheus-compliance-tests
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  pull_request:
+
+jobs:
+  prometheus-compliance-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.17
+      - name: Setup Go Environment
+        run: |
+          echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Cache Go
+        id: go-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/bin
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: prometheus-${{ runner.os }}-go-${{ hashFiles('**/go.mod', '**/go.sum') }}
+      - run: make otelcontribcol
+      - name: Checkout compliance repo
+        uses: actions/checkout@v3
+        with:
+          repository: prometheus/compliance
+          path: compliance
+          ref: f0482884578bac67b053e3eaa1ca7f783d146557 
+      - name: Copy binary to compliance directory
+        run: mkdir compliance/remote_write_sender/bin && cp ./bin/otelcontribcol_linux_amd64 compliance/remote_write_sender/bin/otelcol_linux_amd64
+      - name: Run compliance tests
+        run: go test --tags=compliance -run "TestRemoteWrite/otel/.+" -v ./
+        working-directory: compliance/remote_write_sender

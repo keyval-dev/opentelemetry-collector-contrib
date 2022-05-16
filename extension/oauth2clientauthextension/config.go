@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oauth2clientauthextension
+package oauth2clientauthextension // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/oauth2clientauthextension"
 
 import (
 	"errors"
+	"net/url"
 	"time"
 
 	"go.opentelemetry.io/collector/config"
@@ -39,6 +40,9 @@ type Config struct {
 	// ClientSecret is the application's secret.
 	// See https://datatracker.ietf.org/doc/html/rfc6749#section-2.3.1
 	ClientSecret string `mapstructure:"client_secret"`
+
+	// EndpointParams specifies additional parameters for requests to the token endpoint.
+	EndpointParams url.Values `mapstructure:"endpoint_params"`
 
 	// TokenURL is the resource server's token endpoint
 	// URL. This is a constant specific to each server.

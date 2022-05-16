@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package awsproxy
+package awsproxy // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/awsproxy"
 
 import (
 	"context"
@@ -21,7 +21,6 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
-	"go.opentelemetry.io/collector/extension/extensionhelper"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/proxy"
 )
@@ -35,7 +34,7 @@ const (
 
 // NewFactory creates a factory for awsproxy extension.
 func NewFactory() component.ExtensionFactory {
-	return extensionhelper.NewFactory(
+	return component.NewExtensionFactory(
 		typeStr,
 		createDefaultConfig,
 		createExtension,

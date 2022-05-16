@@ -12,42 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package stanza
+// nolint:errcheck
+package stanza // import "github.com/open-telemetry/opentelemetry-collector-contrib/internal/stanza"
 
 import (
-	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"runtime"
+	"sort"
 	"sync"
-	"time"
 
 	"github.com/open-telemetry/opentelemetry-log-collection/entry"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.uber.org/zap"
 )
 
-const (
-	// DefaultFlushInterval is the default flush interval.
-	DefaultFlushInterval = 100 * time.Millisecond
-	// DefaultMaxFlushCount is the default max flush count.
-	DefaultMaxFlushCount = 100
-)
-
-// Converter converts entry.Entry into pdata.Logs aggregating translated
+// Converter converts a batch of entry.Entry into plog.Logs aggregating translated
 // entries into logs coming from the same Resource.
-// Logs are being sent out based on the flush interval and/or the maximum
-// batch size.
 //
 // The diagram below illustrates the internal communication inside the Converter:
 //
 //            ┌─────────────────────────────────┐
 //            │ Batch()                         │
-//  ┌─────────┤  Ingests log entries and sends  │
-//  │         │  them onto a workerChan         │
+//  ┌─────────┤  Ingests batches of log entries │
+//  │         │  and sends them onto workerChan │
 //  │         └─────────────────────────────────┘
 //  │
 //  │ ┌───────────────────────────────────────────────────┐
@@ -57,17 +51,16 @@ const (
 //  │ │ │ ┌─────────────────────────────────────────────────┴─┐
 //  └─┼─┼─► workerLoop()                                      │
 //    └─┤ │   consumes sent log entries from workerChan,      │
-//      │ │   translates received entries to pdata.LogRecords,│
-//      └─┤   marshalls them to JSON and send them onto       │
-//        │   batchChan                                       │
+//      │ │   translates received entries to plog.LogRecords,│
+//      └─┤   hashes them to generate an ID, and sends them   │
+//        │   onto batchChan                                  │
 //        └─────────────────────────┬─────────────────────────┘
 //                                  │
 //                                  ▼
 //      ┌─────────────────────────────────────────────────────┐
-//      │ batchLoop()                                         │
+//      │ aggregationLoop()                                   │
 //      │   consumes from batchChan, aggregates log records   │
-//      │   by marshaled Resource and based on flush interval │
-//      │   and maxFlushCount decides whether to send the     │
+//      │   by marshaled Resource and sends the               │
 //      │   aggregated buffer to flushChan                    │
 //      └───────────────────────────┬─────────────────────────┘
 //                                  │
@@ -80,36 +73,24 @@ const (
 //      └─────────────────────────────────────────────────────┘
 //
 type Converter struct {
-	// pLogsChan is a channel on which batched logs will be sent to.
-	pLogsChan chan pdata.Logs
+	// pLogsChan is a channel on which aggregated logs will be sent to.
+	pLogsChan chan plog.Logs
 
 	stopOnce sync.Once
 	stopChan chan struct{}
 
 	// workerChan is an internal communication channel that gets the log
 	// entries from Batch() calls and it receives the data in workerLoop().
-	workerChan chan *entry.Entry
+	workerChan chan []*entry.Entry
 	// workerCount configures the amount of workers started.
 	workerCount int
-	// batchChan obtains log entries converted by the pool of workers,
-	// in a form of logRecords grouped by Resource and then after aggregating
-	// them decides based on maxFlushCount if the flush should be triggered.
-	// If also serves the ticker flushes configured by flushInterval.
-	batchChan chan *workerItem
+	// aggregationChan obtains log entries converted by the pool of workers,
+	// in a form of logRecords grouped by Resource and then sends aggregated logs
+	// on flushChan.
+	aggregationChan chan []workerItem
 
-	// flushInterval defines how often we flush the aggregated log entries.
-	flushInterval time.Duration
-	// maxFlushCount defines what's the amount of entries in the buffer that
-	// will trigger a flush of log entries.
-	maxFlushCount uint
-	// flushChan is an internal channel used for transporting batched pdata.Logs.
-	flushChan chan pdata.Logs
-
-	// data holds currently converted and aggregated log entries, grouped by Resource.
-	data map[string]pdata.Logs
-	// logRecordCount holds the number of translated and accumulated log Records
-	// and is compared against maxFlushCount to make a decision whether to flush.
-	logRecordCount uint
+	// flushChan is an internal channel used for transporting batched plog.Logs.
+	flushChan chan plog.Logs
 
 	// wg is a WaitGroup that makes sure that we wait for spun up goroutines exit
 	// when Stop() is called.
@@ -128,18 +109,6 @@ func (f optionFunc) apply(c *Converter) {
 	f(c)
 }
 
-func WithFlushInterval(interval time.Duration) ConverterOption {
-	return optionFunc(func(c *Converter) {
-		c.flushInterval = interval
-	})
-}
-
-func WithMaxFlushCount(count uint) ConverterOption {
-	return optionFunc(func(c *Converter) {
-		c.maxFlushCount = count
-	})
-}
-
 func WithLogger(logger *zap.Logger) ConverterOption {
 	return optionFunc(func(c *Converter) {
 		c.logger = logger
@@ -154,16 +123,13 @@ func WithWorkerCount(workerCount int) ConverterOption {
 
 func NewConverter(opts ...ConverterOption) *Converter {
 	c := &Converter{
-		workerChan:    make(chan *entry.Entry),
-		workerCount:   int(math.Max(1, float64(runtime.NumCPU()/4))),
-		batchChan:     make(chan *workerItem),
-		data:          make(map[string]pdata.Logs),
-		pLogsChan:     make(chan pdata.Logs),
-		stopChan:      make(chan struct{}),
-		logger:        zap.NewNop(),
-		flushChan:     make(chan pdata.Logs),
-		flushInterval: DefaultFlushInterval,
-		maxFlushCount: DefaultMaxFlushCount,
+		workerChan:      make(chan []*entry.Entry),
+		workerCount:     int(math.Max(1, float64(runtime.NumCPU()/4))),
+		aggregationChan: make(chan []workerItem),
+		pLogsChan:       make(chan plog.Logs),
+		stopChan:        make(chan struct{}),
+		logger:          zap.NewNop(),
+		flushChan:       make(chan plog.Logs),
 	}
 
 	for _, opt := range opts {
@@ -182,7 +148,7 @@ func (c *Converter) Start() {
 	}
 
 	c.wg.Add(1)
-	go c.batchLoop()
+	go c.aggregationLoop()
 
 	c.wg.Add(1)
 	go c.flushLoop()
@@ -197,26 +163,21 @@ func (c *Converter) Stop() {
 }
 
 // OutChannel returns the channel on which converted entries will be sent to.
-func (c *Converter) OutChannel() <-chan pdata.Logs {
+func (c *Converter) OutChannel() <-chan plog.Logs {
 	return c.pLogsChan
 }
 
 type workerItem struct {
-	Resource       map[string]string
-	LogRecord      pdata.LogRecord
-	ResourceString string
+	Resource   map[string]interface{}
+	LogRecord  plog.LogRecord
+	ResourceID uint64
 }
 
 // workerLoop is responsible for obtaining log entries from Batch() calls,
-// converting them to pdata.LogRecords and sending them together with the
-// associated Resource through the batchChan for aggregation.
+// converting them to plog.LogRecords and sending them together with the
+// associated Resource through the aggregationChan for aggregation.
 func (c *Converter) workerLoop() {
 	defer c.wg.Done()
-
-	var (
-		buff    = bytes.Buffer{}
-		encoder = json.NewEncoder(&buff)
-	)
 
 	for {
 
@@ -224,89 +185,73 @@ func (c *Converter) workerLoop() {
 		case <-c.stopChan:
 			return
 
-		case e, ok := <-c.workerChan:
+		case entries, ok := <-c.workerChan:
 			if !ok {
 				return
 			}
 
-			buff.Reset()
-			lr := convert(e)
+			workerItems := make([]workerItem, 0, len(entries))
 
-			if err := encoder.Encode(e.Resource); err != nil {
-				c.logger.Debug("Failed marshaling entry.Resource to JSON",
-					zap.Any("resource", e.Resource),
-				)
-				continue
+			for _, e := range entries {
+				lr := convert(e)
+				resourceID := HashResource(e.Resource)
+				workerItems = append(workerItems, workerItem{
+					Resource:   e.Resource,
+					ResourceID: resourceID,
+					LogRecord:  lr,
+				})
 			}
 
 			select {
-			case c.batchChan <- &workerItem{
-				Resource:       e.Resource,
-				ResourceString: buff.String(),
-				LogRecord:      lr,
-			}:
+			case c.aggregationChan <- workerItems:
 			case <-c.stopChan:
 			}
 		}
 	}
 }
 
-// batchLoop is responsible for receiving the converted log entries and aggregating
+// aggregationLoop is responsible for receiving the converted log entries and aggregating
 // them by Resource.
-// Whenever maxFlushCount is reached or the ticker ticks a flush is triggered.
-func (c *Converter) batchLoop() {
+func (c *Converter) aggregationLoop() {
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(c.flushInterval)
-	defer ticker.Stop()
+	resourceIDToLogs := make(map[uint64]plog.Logs)
 
 	for {
 		select {
-		case wi, ok := <-c.batchChan:
+		case workerItems, ok := <-c.aggregationChan:
 			if !ok {
 				return
 			}
 
-			pLogs, ok := c.data[wi.ResourceString]
-			if ok {
-				lr := pLogs.ResourceLogs().
-					At(0).InstrumentationLibraryLogs().
-					At(0).Logs().AppendEmpty()
-				wi.LogRecord.CopyTo(lr)
-			} else {
-				pLogs = pdata.NewLogs()
+			for _, wi := range workerItems {
+				pLogs, ok := resourceIDToLogs[wi.ResourceID]
+				if ok {
+					lr := pLogs.ResourceLogs().
+						At(0).ScopeLogs().
+						At(0).LogRecords().AppendEmpty()
+					wi.LogRecord.CopyTo(lr)
+					continue
+				}
+
+				pLogs = plog.NewLogs()
 				logs := pLogs.ResourceLogs()
 				rls := logs.AppendEmpty()
 
 				resource := rls.Resource()
-				resourceAtts := resource.Attributes()
-				resourceAtts.EnsureCapacity(len(wi.Resource))
-				for k, v := range wi.Resource {
-					resourceAtts.InsertString(k, v)
-				}
+				insertToAttributeMap(wi.Resource, resource.Attributes())
 
-				ills := rls.InstrumentationLibraryLogs()
-				lr := ills.AppendEmpty().Logs().AppendEmpty()
+				ills := rls.ScopeLogs()
+				lr := ills.AppendEmpty().LogRecords().AppendEmpty()
 				wi.LogRecord.CopyTo(lr)
+
+				resourceIDToLogs[wi.ResourceID] = pLogs
 			}
 
-			c.data[wi.ResourceString] = pLogs
-			c.logRecordCount++
-
-			if c.logRecordCount >= c.maxFlushCount {
-				for r, pLogs := range c.data {
-					c.flushChan <- pLogs
-					delete(c.data, r)
-				}
-				c.logRecordCount = 0
-			}
-
-		case <-ticker.C:
-			for r, pLogs := range c.data {
+			for r, pLogs := range resourceIDToLogs {
 				c.flushChan <- pLogs
-				delete(c.data, r)
+				delete(resourceIDToLogs, r)
 			}
-			c.logRecordCount = 0
 
 		case <-c.stopChan:
 			return
@@ -334,8 +279,8 @@ func (c *Converter) flushLoop() {
 	}
 }
 
-// flush flushes provided pdata.Logs entries onto a channel.
-func (c *Converter) flush(ctx context.Context, pLogs pdata.Logs) error {
+// flush flushes provided plog.Logs entries onto a channel.
+func (c *Converter) flush(ctx context.Context, pLogs plog.Logs) error {
 	doneChan := ctx.Done()
 
 	select {
@@ -353,7 +298,7 @@ func (c *Converter) flush(ctx context.Context, pLogs pdata.Logs) error {
 }
 
 // Batch takes in an entry.Entry and sends it to an available worker for processing.
-func (c *Converter) Batch(e *entry.Entry) error {
+func (c *Converter) Batch(e []*entry.Entry) error {
 	select {
 	case c.workerChan <- e:
 		return nil
@@ -362,60 +307,52 @@ func (c *Converter) Batch(e *entry.Entry) error {
 	}
 }
 
-// convert converts one entry.Entry into pdata.LogRecord allocating it.
-func convert(ent *entry.Entry) pdata.LogRecord {
-	dest := pdata.NewLogRecord()
+// convert converts one entry.Entry into plog.LogRecord allocating it.
+func convert(ent *entry.Entry) plog.LogRecord {
+	dest := plog.NewLogRecord()
 	convertInto(ent, dest)
 	return dest
 }
 
-// Convert converts one entry.Entry into pdata.Logs.
+// Convert converts one entry.Entry into plog.Logs.
 // To be used in a stateless setting like tests where ease of use is more
 // important than performance or throughput.
-func Convert(ent *entry.Entry) pdata.Logs {
-	pLogs := pdata.NewLogs()
+func Convert(ent *entry.Entry) plog.Logs {
+	pLogs := plog.NewLogs()
 	logs := pLogs.ResourceLogs()
 
 	rls := logs.AppendEmpty()
 
 	resource := rls.Resource()
-	resourceAtts := resource.Attributes()
-	resourceAtts.EnsureCapacity(len(ent.Resource))
-	for k, v := range ent.Resource {
-		resourceAtts.InsertString(k, v)
-	}
+	insertToAttributeMap(ent.Resource, resource.Attributes())
 
-	ills := rls.InstrumentationLibraryLogs().AppendEmpty()
-	lr := ills.Logs().AppendEmpty()
+	ills := rls.ScopeLogs().AppendEmpty()
+	lr := ills.LogRecords().AppendEmpty()
 	convertInto(ent, lr)
 	return pLogs
 }
 
-// convertInto converts entry.Entry into provided pdata.LogRecord.
-func convertInto(ent *entry.Entry, dest pdata.LogRecord) {
-	dest.SetTimestamp(pdata.NewTimestampFromTime(ent.Timestamp))
+// convertInto converts entry.Entry into provided plog.LogRecord.
+func convertInto(ent *entry.Entry, dest plog.LogRecord) {
+	if !ent.Timestamp.IsZero() {
+		dest.SetTimestamp(pcommon.NewTimestampFromTime(ent.Timestamp))
+	}
+	dest.SetObservedTimestamp(pcommon.NewTimestampFromTime(ent.ObservedTimestamp))
 	dest.SetSeverityNumber(sevMap[ent.Severity])
 	dest.SetSeverityText(sevTextMap[ent.Severity])
 
-	if l := len(ent.Attributes); l > 0 {
-		attributes := dest.Attributes()
-		attributes.EnsureCapacity(l)
-		for k, v := range ent.Attributes {
-			attributes.InsertString(k, v)
-		}
-	}
-
+	insertToAttributeMap(ent.Attributes, dest.Attributes())
 	insertToAttributeVal(ent.Body, dest.Body())
 
 	if ent.TraceId != nil {
 		var buffer [16]byte
 		copy(buffer[0:16], ent.TraceId)
-		dest.SetTraceID(pdata.NewTraceID(buffer))
+		dest.SetTraceID(pcommon.NewTraceID(buffer))
 	}
 	if ent.SpanId != nil {
 		var buffer [8]byte
 		copy(buffer[0:8], ent.SpanId)
-		dest.SetSpanID(pdata.NewSpanID(buffer))
+		dest.SetSpanID(pcommon.NewSpanID(buffer))
 	}
 	if ent.TraceFlags != nil {
 		// The 8 least significant bits are the trace flags as defined in W3C Trace
@@ -427,14 +364,16 @@ func convertInto(ent *entry.Entry, dest pdata.LogRecord) {
 	}
 }
 
-func insertToAttributeVal(value interface{}, dest pdata.AttributeValue) {
+func insertToAttributeVal(value interface{}, dest pcommon.Value) {
 	switch t := value.(type) {
 	case bool:
 		dest.SetBoolVal(t)
 	case string:
 		dest.SetStringVal(t)
+	case []string:
+		toStringArray(t).CopyTo(dest)
 	case []byte:
-		dest.SetStringVal(string(t))
+		dest.SetMBytesVal(t)
 	case int64:
 		dest.SetIntVal(t)
 	case int32:
@@ -468,58 +407,65 @@ func insertToAttributeVal(value interface{}, dest pdata.AttributeValue) {
 	}
 }
 
-func toAttributeMap(obsMap map[string]interface{}) pdata.AttributeValue {
-	attVal := pdata.NewAttributeValueMap()
+func toAttributeMap(obsMap map[string]interface{}) pcommon.Value {
+	attVal := pcommon.NewValueMap()
 	attMap := attVal.MapVal()
-	attMap.EnsureCapacity(len(obsMap))
-	for k, v := range obsMap {
-		switch t := v.(type) {
-		case bool:
-			attMap.InsertBool(k, t)
-		case string:
-			attMap.InsertString(k, t)
-		case []byte:
-			attMap.InsertString(k, string(t))
-		case int64:
-			attMap.InsertInt(k, t)
-		case int32:
-			attMap.InsertInt(k, int64(t))
-		case int16:
-			attMap.InsertInt(k, int64(t))
-		case int8:
-			attMap.InsertInt(k, int64(t))
-		case int:
-			attMap.InsertInt(k, int64(t))
-		case uint64:
-			attMap.InsertInt(k, int64(t))
-		case uint32:
-			attMap.InsertInt(k, int64(t))
-		case uint16:
-			attMap.InsertInt(k, int64(t))
-		case uint8:
-			attMap.InsertInt(k, int64(t))
-		case uint:
-			attMap.InsertInt(k, int64(t))
-		case float64:
-			attMap.InsertDouble(k, t)
-		case float32:
-			attMap.InsertDouble(k, float64(t))
-		case map[string]interface{}:
-			subMap := toAttributeMap(t)
-			attMap.Insert(k, subMap)
-		case []interface{}:
-			arr := toAttributeArray(t)
-			attMap.Insert(k, arr)
-		default:
-			attMap.InsertString(k, fmt.Sprintf("%v", t))
-		}
-	}
+	insertToAttributeMap(obsMap, attMap)
 	return attVal
 }
 
-func toAttributeArray(obsArr []interface{}) pdata.AttributeValue {
-	arrVal := pdata.NewAttributeValueArray()
-	arr := arrVal.ArrayVal()
+func insertToAttributeMap(obsMap map[string]interface{}, dest pcommon.Map) {
+	dest.EnsureCapacity(len(obsMap))
+	for k, v := range obsMap {
+		switch t := v.(type) {
+		case bool:
+			dest.InsertBool(k, t)
+		case string:
+			dest.InsertString(k, t)
+		case []string:
+			arr := toStringArray(t)
+			dest.Insert(k, arr)
+		case []byte:
+			dest.InsertMBytes(k, t)
+		case int64:
+			dest.InsertInt(k, t)
+		case int32:
+			dest.InsertInt(k, int64(t))
+		case int16:
+			dest.InsertInt(k, int64(t))
+		case int8:
+			dest.InsertInt(k, int64(t))
+		case int:
+			dest.InsertInt(k, int64(t))
+		case uint64:
+			dest.InsertInt(k, int64(t))
+		case uint32:
+			dest.InsertInt(k, int64(t))
+		case uint16:
+			dest.InsertInt(k, int64(t))
+		case uint8:
+			dest.InsertInt(k, int64(t))
+		case uint:
+			dest.InsertInt(k, int64(t))
+		case float64:
+			dest.InsertDouble(k, t)
+		case float32:
+			dest.InsertDouble(k, float64(t))
+		case map[string]interface{}:
+			subMap := toAttributeMap(t)
+			dest.Insert(k, subMap)
+		case []interface{}:
+			arr := toAttributeArray(t)
+			dest.Insert(k, arr)
+		default:
+			dest.InsertString(k, fmt.Sprintf("%v", t))
+		}
+	}
+}
+
+func toAttributeArray(obsArr []interface{}) pcommon.Value {
+	arrVal := pcommon.NewValueSlice()
+	arr := arrVal.SliceVal()
 	arr.EnsureCapacity(len(obsArr))
 	for _, v := range obsArr {
 		insertToAttributeVal(v, arr.AppendEmpty())
@@ -527,32 +473,42 @@ func toAttributeArray(obsArr []interface{}) pdata.AttributeValue {
 	return arrVal
 }
 
-var sevMap = map[entry.Severity]pdata.SeverityNumber{
-	entry.Default: pdata.SeverityNumberUNDEFINED,
-	entry.Trace:   pdata.SeverityNumberTRACE,
-	entry.Trace2:  pdata.SeverityNumberTRACE2,
-	entry.Trace3:  pdata.SeverityNumberTRACE3,
-	entry.Trace4:  pdata.SeverityNumberTRACE4,
-	entry.Debug:   pdata.SeverityNumberDEBUG,
-	entry.Debug2:  pdata.SeverityNumberDEBUG2,
-	entry.Debug3:  pdata.SeverityNumberDEBUG3,
-	entry.Debug4:  pdata.SeverityNumberDEBUG4,
-	entry.Info:    pdata.SeverityNumberINFO,
-	entry.Info2:   pdata.SeverityNumberINFO2,
-	entry.Info3:   pdata.SeverityNumberINFO3,
-	entry.Info4:   pdata.SeverityNumberINFO4,
-	entry.Warn:    pdata.SeverityNumberWARN,
-	entry.Warn2:   pdata.SeverityNumberWARN2,
-	entry.Warn3:   pdata.SeverityNumberWARN3,
-	entry.Warn4:   pdata.SeverityNumberWARN4,
-	entry.Error:   pdata.SeverityNumberERROR,
-	entry.Error2:  pdata.SeverityNumberERROR2,
-	entry.Error3:  pdata.SeverityNumberERROR3,
-	entry.Error4:  pdata.SeverityNumberERROR4,
-	entry.Fatal:   pdata.SeverityNumberFATAL,
-	entry.Fatal2:  pdata.SeverityNumberFATAL2,
-	entry.Fatal3:  pdata.SeverityNumberFATAL3,
-	entry.Fatal4:  pdata.SeverityNumberFATAL4,
+func toStringArray(strArr []string) pcommon.Value {
+	arrVal := pcommon.NewValueSlice()
+	arr := arrVal.SliceVal()
+	arr.EnsureCapacity(len(strArr))
+	for _, v := range strArr {
+		insertToAttributeVal(v, arr.AppendEmpty())
+	}
+	return arrVal
+}
+
+var sevMap = map[entry.Severity]plog.SeverityNumber{
+	entry.Default: plog.SeverityNumberUNDEFINED,
+	entry.Trace:   plog.SeverityNumberTRACE,
+	entry.Trace2:  plog.SeverityNumberTRACE2,
+	entry.Trace3:  plog.SeverityNumberTRACE3,
+	entry.Trace4:  plog.SeverityNumberTRACE4,
+	entry.Debug:   plog.SeverityNumberDEBUG,
+	entry.Debug2:  plog.SeverityNumberDEBUG2,
+	entry.Debug3:  plog.SeverityNumberDEBUG3,
+	entry.Debug4:  plog.SeverityNumberDEBUG4,
+	entry.Info:    plog.SeverityNumberINFO,
+	entry.Info2:   plog.SeverityNumberINFO2,
+	entry.Info3:   plog.SeverityNumberINFO3,
+	entry.Info4:   plog.SeverityNumberINFO4,
+	entry.Warn:    plog.SeverityNumberWARN,
+	entry.Warn2:   plog.SeverityNumberWARN2,
+	entry.Warn3:   plog.SeverityNumberWARN3,
+	entry.Warn4:   plog.SeverityNumberWARN4,
+	entry.Error:   plog.SeverityNumberERROR,
+	entry.Error2:  plog.SeverityNumberERROR2,
+	entry.Error3:  plog.SeverityNumberERROR3,
+	entry.Error4:  plog.SeverityNumberERROR4,
+	entry.Fatal:   plog.SeverityNumberFATAL,
+	entry.Fatal2:  plog.SeverityNumberFATAL2,
+	entry.Fatal3:  plog.SeverityNumberFATAL3,
+	entry.Fatal4:  plog.SeverityNumberFATAL4,
 }
 
 var sevTextMap = map[entry.Severity]string{
@@ -581,4 +537,55 @@ var sevTextMap = map[entry.Severity]string{
 	entry.Fatal2:  "Fatal2",
 	entry.Fatal3:  "Fatal3",
 	entry.Fatal4:  "Fatal4",
+}
+
+// pairSep is chosen to be an invalid byte for a utf-8 sequence
+// making it very unlikely to be present in the resource maps keys or values
+var pairSep = []byte{0xfe}
+
+// emptyResourceID is the ID returned by HashResource when it is passed an empty resource.
+// This specific number is chosen as it is the starting offset of fnv64.
+const emptyResourceID uint64 = 14695981039346656037
+
+// HashResource will hash an entry.Entry.Resource
+func HashResource(resource map[string]interface{}) uint64 {
+	if len(resource) == 0 {
+		return emptyResourceID
+	}
+
+	var fnvHash = fnv.New64a()
+	var fnvHashOut = make([]byte, 0, 16)
+	var keySlice = make([]string, 0, len(resource))
+
+	for k := range resource {
+		keySlice = append(keySlice, k)
+	}
+
+	if len(keySlice) > 1 {
+		// In order for this to be deterministic, we need to sort the map. Using range, like above,
+		// has no guarantee about order.
+		sort.Strings(keySlice)
+	}
+
+	for _, k := range keySlice {
+		fnvHash.Write([]byte(k))
+		fnvHash.Write(pairSep)
+
+		switch t := resource[k].(type) {
+		case string:
+			fnvHash.Write([]byte(t))
+		case []byte:
+			fnvHash.Write(t)
+		case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+			binary.Write(fnvHash, binary.BigEndian, t)
+		default:
+			b, _ := json.Marshal(t)
+			fnvHash.Write(b)
+		}
+
+		fnvHash.Write(pairSep)
+	}
+
+	fnvHashOut = fnvHash.Sum(fnvHashOut)
+	return binary.BigEndian.Uint64(fnvHashOut)
 }

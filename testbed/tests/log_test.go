@@ -40,7 +40,7 @@ func TestLog10kDPS(t *testing.T) {
 			receiver: testbed.NewOTLPDataReceiver(testbed.GetAvailablePort(t)),
 			resourceSpec: testbed.ResourceSpec{
 				ExpectedMaxCPU: 30,
-				ExpectedMaxRAM: 85,
+				ExpectedMaxRAM: 120,
 			},
 		},
 		{
@@ -49,7 +49,7 @@ func TestLog10kDPS(t *testing.T) {
 			receiver: testbed.NewOTLPHTTPDataReceiver(testbed.GetAvailablePort(t)),
 			resourceSpec: testbed.ResourceSpec{
 				ExpectedMaxCPU: 30,
-				ExpectedMaxRAM: 85,
+				ExpectedMaxRAM: 120,
 			},
 		},
 		{
@@ -58,7 +58,7 @@ func TestLog10kDPS(t *testing.T) {
 			receiver: testbed.NewOTLPDataReceiver(testbed.GetAvailablePort(t)),
 			resourceSpec: testbed.ResourceSpec{
 				ExpectedMaxCPU: 30,
-				ExpectedMaxRAM: 85,
+				ExpectedMaxRAM: 120,
 			},
 		},
 		{
@@ -67,7 +67,7 @@ func TestLog10kDPS(t *testing.T) {
 			receiver: testbed.NewOTLPDataReceiver(testbed.GetAvailablePort(t)),
 			resourceSpec: testbed.ResourceSpec{
 				ExpectedMaxCPU: 30,
-				ExpectedMaxRAM: 86,
+				ExpectedMaxRAM: 120,
 			},
 			extensions: datasenders.NewLocalFileStorageExtension(),
 		},
@@ -76,7 +76,7 @@ func TestLog10kDPS(t *testing.T) {
 			sender:   datasenders.NewKubernetesContainerWriter(),
 			receiver: testbed.NewOTLPDataReceiver(testbed.GetAvailablePort(t)),
 			resourceSpec: testbed.ResourceSpec{
-				ExpectedMaxCPU: 100,
+				ExpectedMaxCPU: 110,
 				ExpectedMaxRAM: 150,
 			},
 		},

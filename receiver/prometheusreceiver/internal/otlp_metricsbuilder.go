@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package internal
+package internal // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/internal"
 
 import (
 	"fmt"
@@ -21,30 +21,31 @@ import (
 	"strconv"
 
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/textparse"
-	"go.opentelemetry.io/collector/model/pdata"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/textparse"
+	"github.com/prometheus/prometheus/model/value"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 )
 
-func isUsefulLabelPdata(mType pdata.MetricDataType, labelKey string) bool {
+func isUsefulLabel(mType pmetric.MetricDataType, labelKey string) bool {
 	switch labelKey {
 	case model.MetricNameLabel, model.InstanceLabel, model.SchemeLabel, model.MetricsPathLabel, model.JobLabel:
 		return false
 	case model.BucketLabel:
-		return mType != pdata.MetricDataTypeHistogram
+		return mType != pmetric.MetricDataTypeHistogram
 	case model.QuantileLabel:
-		return mType != pdata.MetricDataTypeSummary
+		return mType != pmetric.MetricDataTypeSummary
 	}
 	return true
 }
 
-func getBoundaryPdata(metricType pdata.MetricDataType, labels labels.Labels) (float64, error) {
+func getBoundary(metricType pmetric.MetricDataType, labels labels.Labels) (float64, error) {
 	labelName := ""
 	switch metricType {
-	case pdata.MetricDataTypeHistogram:
+	case pmetric.MetricDataTypeHistogram:
 		labelName = model.BucketLabel
-	case pdata.MetricDataTypeSummary:
+	case pmetric.MetricDataTypeSummary:
 		labelName = model.QuantileLabel
 	default:
 		return 0, errNoBoundaryLabel
@@ -58,61 +59,74 @@ func getBoundaryPdata(metricType pdata.MetricDataType, labels labels.Labels) (fl
 	return strconv.ParseFloat(v, 64)
 }
 
-func convToPdataMetricType(metricType textparse.MetricType) pdata.MetricDataType {
+func convToMetricType(metricType textparse.MetricType) pmetric.MetricDataType {
 	switch metricType {
 	case textparse.MetricTypeCounter:
 		// always use float64, as it's the internal data type used in prometheus
-		return pdata.MetricDataTypeSum
-	// textparse.MetricTypeUnknown is converted to gauge by default to fix Prometheus untyped metrics from being dropped
+		return pmetric.MetricDataTypeSum
+	// textparse.MetricTypeUnknown is converted to gauge by default to prevent Prometheus untyped metrics from being dropped
 	case textparse.MetricTypeGauge, textparse.MetricTypeUnknown:
-		return pdata.MetricDataTypeGauge
+		return pmetric.MetricDataTypeGauge
 	case textparse.MetricTypeHistogram:
-		return pdata.MetricDataTypeHistogram
+		return pmetric.MetricDataTypeHistogram
 	// dropping support for gaugehistogram for now until we have an official spec of its implementation
 	// a draft can be found in: https://docs.google.com/document/d/1KwV0mAXwwbvvifBvDKH_LU1YjyXE_wxCkHNoCGq1GX0/edit#heading=h.1cvzqd4ksd23
 	// case textparse.MetricTypeGaugeHistogram:
-	//	return metricspb.MetricDescriptor_GAUGE_DISTRIBUTION
+	//	return <pdata gauge histogram type>
 	case textparse.MetricTypeSummary:
-		return pdata.MetricDataTypeSummary
+		return pmetric.MetricDataTypeSummary
 	default:
-		// including: textparse.MetricTypeInfo, textparse.MetricTypeStateset
-		return pdata.MetricDataTypeNone
+		// including: textparse.MetricTypeGaugeHistogram, textparse.MetricTypeInfo, textparse.MetricTypeStateset
+		return pmetric.MetricDataTypeNone
 	}
 }
 
-type metricBuilderPdata struct {
-	*metricBuilder
-	metrics   pdata.MetricSlice
-	currentMf MetricFamilyPdata
+type metricBuilder struct {
+	metrics              pmetric.MetricSlice
+	families             map[string]*metricFamily
+	hasData              bool
+	hasInternalMetric    bool
+	mc                   MetadataCache
+	numTimeseries        int
+	droppedTimeseries    int
+	useStartTimeMetric   bool
+	startTimeMetricRegex *regexp.Regexp
+	startTime            float64
+	intervalStartTimeMs  int64
+	logger               *zap.Logger
 }
 
 // newMetricBuilder creates a MetricBuilder which is allowed to feed all the datapoints from a single prometheus
-// scraped page by calling its AddDataPoint function, and turn them into an opencensus data.MetricsData object
+// scraped page by calling its AddDataPoint function, and turn them into a pmetric.Metrics object.
 // by calling its Build function
-func newMetricBuilderPdata(mc MetadataCache, useStartTimeMetric bool, startTimeMetricRegex string, logger *zap.Logger) *metricBuilderPdata {
+func newMetricBuilder(mc MetadataCache, useStartTimeMetric bool, startTimeMetricRegex string, logger *zap.Logger, intervalStartTimeMs int64) *metricBuilder {
 	var regex *regexp.Regexp
 	if startTimeMetricRegex != "" {
 		regex, _ = regexp.Compile(startTimeMetricRegex)
 	}
-	return &metricBuilderPdata{
-		metrics: pdata.NewMetricSlice(),
-		metricBuilder: &metricBuilder{
-			mc:                   mc,
-			logger:               logger,
-			numTimeseries:        0,
-			droppedTimeseries:    0,
-			useStartTimeMetric:   useStartTimeMetric,
-			startTimeMetricRegex: regex,
-		},
+	return &metricBuilder{
+		metrics:              pmetric.NewMetricSlice(),
+		families:             map[string]*metricFamily{},
+		mc:                   mc,
+		logger:               logger,
+		numTimeseries:        0,
+		droppedTimeseries:    0,
+		useStartTimeMetric:   useStartTimeMetric,
+		startTimeMetricRegex: regex,
+		intervalStartTimeMs:  intervalStartTimeMs,
 	}
 }
 
-// This code is used in follow-up changes but golangci-lint is so pedantic.
-var _ = newMetricBuilderPdata
-var _ = (*metricBuilderPdata)(nil).AddDataPoint
+func (b *metricBuilder) matchStartTimeMetric(metricName string) bool {
+	if b.startTimeMetricRegex != nil {
+		return b.startTimeMetricRegex.MatchString(metricName)
+	}
+
+	return metricName == startTimeMetricName
+}
 
 // AddDataPoint is for feeding prometheus data complexValue in its processing order
-func (b *metricBuilderPdata) AddDataPoint(ls labels.Labels, t int64, v float64) error {
+func (b *metricBuilder) AddDataPoint(ls labels.Labels, t int64, v float64) error {
 	// Any datapoint with duplicate labels MUST be rejected per:
 	// * https://github.com/open-telemetry/wg-prometheus/issues/44
 	// * https://github.com/open-telemetry/opentelemetry-collector/issues/3407
@@ -141,7 +155,8 @@ func (b *metricBuilderPdata) AddDataPoint(ls labels.Labels, t int64, v float64) 
 		lm := ls.Map()
 		// See https://www.prometheus.io/docs/concepts/jobs_instances/#automatically-generated-labels-and-time-series
 		// up: 1 if the instance is healthy, i.e. reachable, or 0 if the scrape failed.
-		if metricName == scrapeUpMetricName && v != 1.0 {
+		// But it can also be a staleNaN, which is inserted when the target goes away.
+		if metricName == scrapeUpMetricName && v != 1.0 && !value.IsStaleNaN(v) {
 			if v == 0.0 {
 				b.logger.Warn("Failed to scrape Prometheus endpoint",
 					zap.Int64("scrape_timestamp", t),
@@ -159,14 +174,36 @@ func (b *metricBuilderPdata) AddDataPoint(ls labels.Labels, t int64, v float64) 
 
 	b.hasData = true
 
-	if b.currentMf != nil && !b.currentMf.IsSameFamily(metricName) {
-		ts, dts := b.currentMf.ToMetricPdata(&b.metrics)
-		b.numTimeseries += ts
-		b.droppedTimeseries += dts
-		b.currentMf = newMetricFamilyPdata(metricName, b.mc, b.intervalStartTimeMs)
-	} else if b.currentMf == nil {
-		b.currentMf = newMetricFamilyPdata(metricName, b.mc, b.intervalStartTimeMs)
+	curMF, ok := b.families[metricName]
+	if !ok {
+		familyName := normalizeMetricName(metricName)
+		if mf, ok := b.families[familyName]; ok && mf.includesMetric(metricName) {
+			curMF = mf
+		} else {
+			curMF = newMetricFamily(metricName, b.mc, b.logger)
+			b.families[curMF.name] = curMF
+		}
 	}
 
-	return b.currentMf.Add(metricName, ls, t, v)
+	return curMF.Add(metricName, ls, t, v)
+}
+
+// Build an pmetric.MetricSlice based on all added data complexValue.
+// The only error returned by this function is errNoDataToBuild.
+func (b *metricBuilder) Build() (*pmetric.MetricSlice, int, int, error) {
+	if !b.hasData {
+		if b.hasInternalMetric {
+			metricsL := pmetric.NewMetricSlice()
+			return &metricsL, 0, 0, nil
+		}
+		return nil, 0, 0, errNoDataToBuild
+	}
+
+	for _, mf := range b.families {
+		ts, dts := mf.ToMetric(&b.metrics)
+		b.numTimeseries += ts
+		b.droppedTimeseries += dts
+	}
+
+	return &b.metrics, b.numTimeseries, b.droppedTimeseries, nil
 }

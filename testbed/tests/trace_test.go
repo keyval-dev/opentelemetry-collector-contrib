@@ -22,14 +22,13 @@ package tests
 
 import (
 	"context"
-	"path"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/idutils"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/testbed/datareceivers"
@@ -55,7 +54,7 @@ func TestTrace10kSPS(t *testing.T) {
 			datareceivers.NewJaegerDataReceiver(testbed.GetAvailablePort(t)),
 			testbed.ResourceSpec{
 				ExpectedMaxCPU: 40,
-				ExpectedMaxRAM: 90,
+				ExpectedMaxRAM: 100,
 			},
 		},
 		{
@@ -64,7 +63,7 @@ func TestTrace10kSPS(t *testing.T) {
 			datareceivers.NewOCDataReceiver(testbed.GetAvailablePort(t)),
 			testbed.ResourceSpec{
 				ExpectedMaxCPU: 39,
-				ExpectedMaxRAM: 90,
+				ExpectedMaxRAM: 100,
 			},
 		},
 		{
@@ -73,7 +72,7 @@ func TestTrace10kSPS(t *testing.T) {
 			testbed.NewOTLPDataReceiver(testbed.GetAvailablePort(t)),
 			testbed.ResourceSpec{
 				ExpectedMaxCPU: 20,
-				ExpectedMaxRAM: 90,
+				ExpectedMaxRAM: 100,
 			},
 		},
 		{
@@ -109,7 +108,7 @@ func TestTrace10kSPS(t *testing.T) {
 			datareceivers.NewSapmDataReceiver(testbed.GetAvailablePort(t)),
 			testbed.ResourceSpec{
 				ExpectedMaxCPU: 32,
-				ExpectedMaxRAM: 98,
+				ExpectedMaxRAM: 100,
 			},
 		},
 		{
@@ -118,7 +117,7 @@ func TestTrace10kSPS(t *testing.T) {
 			datareceivers.NewZipkinDataReceiver(testbed.GetAvailablePort(t)),
 			testbed.ResourceSpec{
 				ExpectedMaxCPU: 80,
-				ExpectedMaxRAM: 100,
+				ExpectedMaxRAM: 120,
 			},
 		},
 	}
@@ -236,7 +235,7 @@ func TestTraceBallast1kSPSWithAttrs(t *testing.T) {
 		{
 			attrCount:      0,
 			attrSizeByte:   0,
-			expectedMaxCPU: 30,
+			expectedMaxCPU: 53,
 			expectedMaxRAM: 2200,
 			resultsSummary: performanceResultsSummary,
 		},
@@ -336,7 +335,7 @@ func verifySingleSpan(
 	tc *testbed.TestCase,
 	serviceName string,
 	spanName string,
-	verifyReceived func(span pdata.Span),
+	verifyReceived func(span ptrace.Span),
 ) {
 
 	// Clear previously received traces.
@@ -344,12 +343,10 @@ func verifySingleSpan(
 	startCounter := tc.MockBackend.DataItemsReceived()
 
 	// Send one span.
-	td := pdata.NewTraces()
+	td := ptrace.NewTraces()
 	rs := td.ResourceSpans().AppendEmpty()
-	rs.Resource().Attributes().InitFromMap(map[string]pdata.AttributeValue{
-		conventions.AttributeServiceName: pdata.NewAttributeValueString(serviceName),
-	})
-	span := rs.InstrumentationLibrarySpans().AppendEmpty().Spans().AppendEmpty()
+	rs.Resource().Attributes().InsertString(conventions.AttributeServiceName, serviceName)
+	span := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
 	span.SetTraceID(idutils.UInt64ToTraceID(0, 1))
 	span.SetSpanID(idutils.UInt64ToSpanID(1))
 	span.SetName(spanName)
@@ -370,7 +367,7 @@ func verifySingleSpan(
 	for _, td := range tc.MockBackend.ReceivedTraces {
 		rs := td.ResourceSpans()
 		for i := 0; i < rs.Len(); i++ {
-			ils := rs.At(i).InstrumentationLibrarySpans()
+			ils := rs.At(i).ScopeSpans()
 			for j := 0; j < ils.Len(); j++ {
 				spans := ils.At(j).Spans()
 				for k := 0; k < spans.Len(); k++ {
@@ -403,7 +400,7 @@ func TestTraceAttributesProcessor(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			resultDir, err := filepath.Abs(path.Join("results", t.Name()))
+			resultDir, err := filepath.Abs(filepath.Join("results", t.Name()))
 			require.NoError(t, err)
 
 			// Use processor to add attributes to certain spans.
@@ -457,7 +454,7 @@ func TestTraceAttributesProcessor(t *testing.T) {
 			nodeToInclude := "service-to-add-attr"
 
 			// verifySpan verifies that attributes was added to the internal data span.
-			verifySpan := func(span pdata.Span) {
+			verifySpan := func(span ptrace.Span) {
 				require.NotNil(t, span)
 				require.Equal(t, span.Attributes().Len(), 1)
 				attrVal, ok := span.Attributes().Get("new_attr")
@@ -470,14 +467,14 @@ func TestTraceAttributesProcessor(t *testing.T) {
 			// Create a service name that does not match "include" filter.
 			nodeToExclude := "service-not-to-add-attr"
 
-			verifySingleSpan(t, tc, nodeToExclude, spanToInclude, func(span pdata.Span) {
+			verifySingleSpan(t, tc, nodeToExclude, spanToInclude, func(span ptrace.Span) {
 				// Verify attributes was not added to the new internal data span.
 				assert.Equal(t, span.Attributes().Len(), 0)
 			})
 
 			// Create another span that does not match "include" filter.
 			spanToExclude := "span-not-to-add-attr"
-			verifySingleSpan(t, tc, nodeToInclude, spanToExclude, func(span pdata.Span) {
+			verifySingleSpan(t, tc, nodeToInclude, spanToExclude, func(span ptrace.Span) {
 				// Verify attributes was not added to the new internal data span.
 				assert.Equal(t, span.Attributes().Len(), 0)
 			})

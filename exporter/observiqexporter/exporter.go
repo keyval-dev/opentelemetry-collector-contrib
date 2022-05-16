@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package observiqexporter
+package observiqexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/observiqexporter"
 
 import (
 	"errors"
@@ -26,7 +26,7 @@ func newObservIQLogExporter(config *Config, set component.ExporterCreateSettings
 		return nil, errors.New("config must not be nil")
 	}
 
-	if err := config.validateConfig(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 

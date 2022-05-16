@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint:errcheck
 package sapmreceiver
 
 import (
@@ -29,54 +30,50 @@ import (
 	"github.com/signalfx/sapm-proto/sapmprotocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opencensus.io/trace"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testutil"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/splunk"
 )
 
-func expectedTraceData(t1, t2, t3 time.Time) pdata.Traces {
-	traceID := pdata.NewTraceID(
+func expectedTraceData(t1, t2, t3 time.Time) ptrace.Traces {
+	traceID := pcommon.NewTraceID(
 		[16]byte{0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF, 0x80})
-	parentSpanID := pdata.NewSpanID([8]byte{0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18})
-	childSpanID := pdata.NewSpanID([8]byte{0xAF, 0xAE, 0xAD, 0xAC, 0xAB, 0xAA, 0xA9, 0xA8})
+	parentSpanID := pcommon.NewSpanID([8]byte{0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18})
+	childSpanID := pcommon.NewSpanID([8]byte{0xAF, 0xAE, 0xAD, 0xAC, 0xAB, 0xAA, 0xA9, 0xA8})
 
-	traces := pdata.NewTraces()
+	traces := ptrace.NewTraces()
 	rs := traces.ResourceSpans().AppendEmpty()
 	rs.Resource().Attributes().InsertString(conventions.AttributeServiceName, "issaTest")
 	rs.Resource().Attributes().InsertBool("bool", true)
 	rs.Resource().Attributes().InsertString("string", "yes")
 	rs.Resource().Attributes().InsertInt("int64", 10000000)
-	spans := rs.InstrumentationLibrarySpans().AppendEmpty().Spans()
+	spans := rs.ScopeSpans().AppendEmpty().Spans()
 
 	span0 := spans.AppendEmpty()
 	span0.SetSpanID(childSpanID)
 	span0.SetParentSpanID(parentSpanID)
 	span0.SetTraceID(traceID)
 	span0.SetName("DBSearch")
-	span0.SetStartTimestamp(pdata.NewTimestampFromTime(t1))
-	span0.SetEndTimestamp(pdata.NewTimestampFromTime(t2))
-	// Set invalid status code that is not with the valid list of value.
-	// This will be set from incoming invalid code.
-	span0.Status().SetCode(trace.StatusCodeNotFound)
+	span0.SetStartTimestamp(pcommon.NewTimestampFromTime(t1))
+	span0.SetEndTimestamp(pcommon.NewTimestampFromTime(t2))
+	span0.Status().SetCode(ptrace.StatusCodeError)
 	span0.Status().SetMessage("Stale indices")
 
 	span1 := spans.AppendEmpty()
 	span1.SetSpanID(parentSpanID)
 	span1.SetTraceID(traceID)
 	span1.SetName("ProxyFetch")
-	span1.SetStartTimestamp(pdata.NewTimestampFromTime(t2))
-	span1.SetEndTimestamp(pdata.NewTimestampFromTime(t3))
-	// Set invalid status code that is not with the valid list of value.
-	// This will be set from incoming invalid code.
-	span1.Status().SetCode(trace.StatusCodeInternal)
+	span1.SetStartTimestamp(pcommon.NewTimestampFromTime(t2))
+	span1.SetEndTimestamp(pcommon.NewTimestampFromTime(t3))
+	span1.Status().SetCode(ptrace.StatusCodeError)
 	span1.Status().SetMessage("Frontend crash")
 
 	return traces
@@ -106,7 +103,7 @@ func grpcFixture(t1 time.Time) *model.Batch {
 				Duration:      10 * time.Minute,
 				Tags: []model.KeyValue{
 					model.String(conventions.OtelStatusDescription, "Stale indices"),
-					model.Int64(conventions.OtelStatusCode, trace.StatusCodeNotFound),
+					model.String(conventions.OtelStatusCode, "ERROR"),
 					model.Bool("error", true),
 				},
 				References: []model.SpanRef{
@@ -125,7 +122,7 @@ func grpcFixture(t1 time.Time) *model.Batch {
 				Duration:      2 * time.Second,
 				Tags: []model.KeyValue{
 					model.String(conventions.OtelStatusDescription, "Frontend crash"),
-					model.Int64(conventions.OtelStatusCode, trace.StatusCodeInternal),
+					model.String(conventions.OtelStatusCode, "ERROR"),
 					model.Bool("error", true),
 				},
 			},
@@ -239,7 +236,7 @@ func TestReception(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want pdata.Traces
+		want ptrace.Traces
 	}{
 		{
 			name: "receive uncompressed sapm",

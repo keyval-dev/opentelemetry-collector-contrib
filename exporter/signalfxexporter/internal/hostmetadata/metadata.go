@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hostmetadata
+package hostmetadata // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/hostmetadata"
 
 import (
 	"sync"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/dimensions"
@@ -40,7 +41,7 @@ func NewSyncer(logger *zap.Logger, dimClient dimensions.MetadataUpdateClient) *S
 	}
 }
 
-func (s *Syncer) Sync(md pdata.Metrics) {
+func (s *Syncer) Sync(md pmetric.Metrics) {
 	// skip if already synced or if metrics data is empty
 	if md.ResourceMetrics().Len() == 0 {
 		return
@@ -50,7 +51,7 @@ func (s *Syncer) Sync(md pdata.Metrics) {
 	})
 }
 
-func (s *Syncer) syncOnResource(res pdata.Resource) {
+func (s *Syncer) syncOnResource(res pcommon.Resource) {
 	// If resourcedetection processor is enabled, all the metrics should have resource attributes
 	// that can be used to update host metadata.
 	// Based of this assumption we check just one ResourceMetrics object,

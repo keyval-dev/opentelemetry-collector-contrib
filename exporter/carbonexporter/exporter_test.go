@@ -22,7 +22,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,11 +32,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/common/testutil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/metricstestutil"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/testutil"
 	internaldata "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/opencensus"
 )
 
@@ -99,7 +99,7 @@ func TestConsumeMetricsData(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		md           pdata.Metrics
+		md           pmetric.Metrics
 		acceptClient bool
 		createServer bool
 	}{
@@ -161,11 +161,9 @@ func TestConsumeMetricsData(t *testing.T) {
 			}
 
 			if !tt.acceptClient {
-				// Due to differences between platforms is not certain if the
-				// call to ConsumeMetricsData below will produce error or not.
-				// See comment about recvfrom at connPool.Write for detailed
-				// information.
-				exp.ConsumeMetrics(context.Background(), tt.md)
+				// Due to differences between platforms is not certain if the call to ConsumeMetrics below will produce error or not.
+				// See comment about recvfrom at connPool.Write for detailed information.
+				_ = exp.ConsumeMetrics(context.Background(), tt.md)
 				assert.NoError(t, exp.Shutdown(context.Background()))
 				return
 			}
@@ -225,17 +223,17 @@ func Test_connPool_Concurrency(t *testing.T) {
 	concurrentWriters := 3
 	writesPerRoutine := 3
 
-	var doneFlag int64
-	defer func(flag *int64) {
-		atomic.StoreInt64(flag, 1)
-	}(&doneFlag)
+	doneFlag := atomic.NewBool(false)
+	defer func() {
+		doneFlag.Store(true)
+	}()
 
 	var recvWG sync.WaitGroup
 	recvWG.Add(concurrentWriters * writesPerRoutine * md.MetricCount())
 	go func() {
 		for {
 			conn, err := ln.AcceptTCP()
-			if atomic.LoadInt64(&doneFlag) != 0 {
+			if doneFlag.Load() {
 				// Close is expected to cause error.
 				return
 			}
@@ -275,12 +273,12 @@ func Test_connPool_Concurrency(t *testing.T) {
 
 	close(startCh) // Release all workers
 	writersWG.Wait()
-	sender.Shutdown(context.Background())
+	assert.NoError(t, sender.Shutdown(context.Background()))
 
 	recvWG.Wait()
 }
 
-func generateLargeBatch() pdata.Metrics {
+func generateLargeBatch() pmetric.Metrics {
 	var metrics []*metricspb.Metric
 	ts := time.Now()
 	for i := 0; i < 65000; i++ {

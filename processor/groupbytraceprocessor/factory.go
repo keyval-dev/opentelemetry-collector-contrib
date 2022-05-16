@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package groupbytraceprocessor
+package groupbytraceprocessor // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbytraceprocessor"
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/processor/processorhelper"
 )
 
 const (
@@ -47,10 +46,10 @@ func NewFactory() component.ProcessorFactory {
 	// TODO: find a more appropriate way to get this done, as we are swallowing the error here
 	_ = view.Register(MetricViews()...)
 
-	return processorhelper.NewFactory(
+	return component.NewProcessorFactory(
 		typeStr,
 		createDefaultConfig,
-		processorhelper.WithTraces(createTracesProcessor))
+		component.WithTracesProcessor(createTracesProcessor))
 }
 
 // createDefaultConfig creates the default configuration for the processor.

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testbed
+package testbed // import "github.com/open-telemetry/opentelemetry-collector-contrib/testbed/testbed"
 
 import (
 	"fmt"
@@ -139,22 +139,20 @@ func (tc *TestCase) composeTestResultFileName(fileName string) string {
 func (tc *TestCase) StartAgent(args ...string) {
 	logFileName := tc.composeTestResultFileName("agent.log")
 
-	err := tc.agentProc.Start(StartParams{
+	startParams := StartParams{
 		Name:         "Agent",
 		LogFilePath:  logFileName,
 		CmdArgs:      args,
 		resourceSpec: &tc.resourceSpec,
-	})
-
-	if err != nil {
+	}
+	if err := tc.agentProc.Start(startParams); err != nil {
 		tc.indicateError(err)
 		return
 	}
 
 	// Start watching resource consumption.
 	go func() {
-		err := tc.agentProc.WatchResourceConsumption()
-		if err != nil {
+		if err := tc.agentProc.WatchResourceConsumption(); err != nil {
 			tc.indicateError(err)
 		}
 	}()

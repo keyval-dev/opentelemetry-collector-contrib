@@ -21,7 +21,7 @@
 //
 // Agent and load generator must be pre-built and their paths must be specified in
 // test bed config file. RUN_TESTBED env variable must be defined for tests to run.
-package testbed
+package testbed // import "github.com/open-telemetry/opentelemetry-collector-contrib/testbed/testbed"
 
 import (
 	"log"
@@ -61,7 +61,7 @@ var GlobalConfig = struct {
 }{
 	// DefaultAgentExeRelativeFile the default exe that is produced by Makefile "otelcol" target relative
 	// to testbed/tests directory.
-	DefaultAgentExeRelativeFile: "../../bin/otelcontribcol_{{.GOOS}}_{{.GOARCH}}",
+	DefaultAgentExeRelativeFile: "../../bin/otelcontribcol_testbed_{{.GOOS}}_{{.GOARCH}}",
 }
 
 // DoTestMain is intended to be run from TestMain somewhere in the test suit.

@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dimensions
+package dimensions // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/internal/dimensions"
 
 import (
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"go.uber.org/multierr"
 
@@ -111,7 +110,6 @@ func (dc *DimensionClient) PushMetadata(metadata []*metadata.MetadataUpdate) err
 		dimensionUpdate := getDimensionUpdateFromMetadata(*m, dc.metricsConverter)
 
 		if dimensionUpdate.Name == "" || dimensionUpdate.Value == "" {
-			atomic.AddInt64(&dc.TotalInvalidDimensions, int64(1))
 			return fmt.Errorf("dimensionUpdate %v is missing Name or value, cannot send", dimensionUpdate)
 		}
 

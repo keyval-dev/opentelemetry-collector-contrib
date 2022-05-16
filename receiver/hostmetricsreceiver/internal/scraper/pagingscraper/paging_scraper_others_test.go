@@ -22,7 +22,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -42,20 +42,20 @@ func TestScrape_Errors(t *testing.T) {
 		{
 			name:              "virtualMemoryError",
 			virtualMemoryFunc: func() ([]*pageFileStats, error) { return nil, errors.New("err1") },
-			expectedError:     "err1",
+			expectedError:     "failed to read page file stats: err1",
 			expectedErrCount:  pagingUsageMetricsLen,
 		},
 		{
 			name:             "swapMemoryError",
 			swapMemoryFunc:   func() (*mem.SwapMemoryStat, error) { return nil, errors.New("err2") },
-			expectedError:    "err2",
+			expectedError:    "failed to read swap info: err2",
 			expectedErrCount: pagingMetricsLen,
 		},
 		{
 			name:              "multipleErrors",
 			virtualMemoryFunc: func() ([]*pageFileStats, error) { return nil, errors.New("err1") },
 			swapMemoryFunc:    func() (*mem.SwapMemoryStat, error) { return nil, errors.New("err2") },
-			expectedError:     "err1; err2",
+			expectedError:     "failed to read page file stats: err1; failed to read swap info: err2",
 			expectedErrCount:  pagingUsageMetricsLen + pagingMetricsLen,
 		},
 	}

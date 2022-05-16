@@ -19,87 +19,102 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func TestBuildCounterMetric(t *testing.T) {
 	timeNow := time.Now()
 	lastUpdateInterval := timeNow.Add(-1 * time.Minute)
-	metricDescription := statsDMetricdescription{
-		name: "testCounter",
+	metricDescription := statsDMetricDescription{
+		name:  "testCounter",
+		attrs: attribute.NewSet(attribute.String("mykey", "myvalue")),
 	}
+
 	parsedMetric := statsDMetric{
 		description: metricDescription,
 		asFloat:     32,
 		unit:        "meter",
-		labelKeys:   []string{"mykey"},
-		labelValues: []string{"myvalue"},
 	}
 	isMonotonicCounter := false
 	metric := buildCounterMetric(parsedMetric, isMonotonicCounter, timeNow, lastUpdateInterval)
-	expectedMetrics := pdata.NewInstrumentationLibraryMetrics()
+	expectedMetrics := pmetric.NewScopeMetrics()
 	expectedMetric := expectedMetrics.Metrics().AppendEmpty()
 	expectedMetric.SetName("testCounter")
 	expectedMetric.SetUnit("meter")
-	expectedMetric.SetDataType(pdata.MetricDataTypeSum)
-	expectedMetric.Sum().SetAggregationTemporality(pdata.MetricAggregationTemporalityDelta)
+	expectedMetric.SetDataType(pmetric.MetricDataTypeSum)
+	expectedMetric.Sum().SetAggregationTemporality(pmetric.MetricAggregationTemporalityDelta)
 	expectedMetric.Sum().SetIsMonotonic(isMonotonicCounter)
 	dp := expectedMetric.Sum().DataPoints().AppendEmpty()
 	dp.SetIntVal(32)
-	dp.SetStartTimestamp(pdata.NewTimestampFromTime(lastUpdateInterval))
-	dp.SetTimestamp(pdata.NewTimestampFromTime(timeNow))
+	dp.SetStartTimestamp(pcommon.NewTimestampFromTime(lastUpdateInterval))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(timeNow))
 	dp.Attributes().InsertString("mykey", "myvalue")
 	assert.Equal(t, metric, expectedMetrics)
 }
 
 func TestBuildGaugeMetric(t *testing.T) {
 	timeNow := time.Now()
-	metricDescription := statsDMetricdescription{
+	metricDescription := statsDMetricDescription{
 		name: "testGauge",
+		attrs: attribute.NewSet(
+			attribute.String("mykey", "myvalue"),
+			attribute.String("mykey2", "myvalue2"),
+		),
 	}
 	parsedMetric := statsDMetric{
 		description: metricDescription,
 		asFloat:     32.3,
 		unit:        "meter",
-		labelKeys:   []string{"mykey", "mykey2"},
-		labelValues: []string{"myvalue", "myvalue2"},
 	}
 	metric := buildGaugeMetric(parsedMetric, timeNow)
-	expectedMetrics := pdata.NewInstrumentationLibraryMetrics()
+	expectedMetrics := pmetric.NewScopeMetrics()
 	expectedMetric := expectedMetrics.Metrics().AppendEmpty()
 	expectedMetric.SetName("testGauge")
 	expectedMetric.SetUnit("meter")
-	expectedMetric.SetDataType(pdata.MetricDataTypeGauge)
+	expectedMetric.SetDataType(pmetric.MetricDataTypeGauge)
 	dp := expectedMetric.Gauge().DataPoints().AppendEmpty()
 	dp.SetDoubleVal(32.3)
-	dp.SetTimestamp(pdata.NewTimestampFromTime(timeNow))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(timeNow))
 	dp.Attributes().InsertString("mykey", "myvalue")
 	dp.Attributes().InsertString("mykey2", "myvalue2")
 	assert.Equal(t, metric, expectedMetrics)
 }
 
-func TestBuildSummaryMetric(t *testing.T) {
+func TestBuildSummaryMetricUnsampled(t *testing.T) {
 	timeNow := time.Now()
 
-	oneSummaryMetric := summaryMetric{
-		name:          "testSummary",
-		summaryPoints: []float64{1, 2, 4, 6, 5, 3},
-		labelKeys:     []string{"mykey", "mykey2"},
-		labelValues:   []string{"myvalue", "myvalue2"},
-		timeNow:       timeNow,
+	unsampledMetric := summaryMetric{
+		points:  []float64{1, 2, 4, 6, 5, 3},
+		weights: []float64{1, 1, 1, 1, 1, 1},
 	}
 
-	metric := buildSummaryMetric(oneSummaryMetric)
-	expectedMetric := pdata.NewInstrumentationLibraryMetrics()
+	attrs := attribute.NewSet(
+		attribute.String("mykey", "myvalue"),
+		attribute.String("mykey2", "myvalue2"),
+	)
+
+	desc := statsDMetricDescription{
+		name:       "testSummary",
+		metricType: HistogramType,
+		attrs:      attrs,
+	}
+
+	metric := pmetric.NewScopeMetrics()
+	buildSummaryMetric(desc, unsampledMetric, timeNow.Add(-time.Minute), timeNow, statsDDefaultPercentiles, metric)
+
+	expectedMetric := pmetric.NewScopeMetrics()
 	m := expectedMetric.Metrics().AppendEmpty()
 	m.SetName("testSummary")
-	m.SetDataType(pdata.MetricDataTypeSummary)
+	m.SetDataType(pmetric.MetricDataTypeSummary)
 	dp := m.Summary().DataPoints().AppendEmpty()
 	dp.SetSum(21)
 	dp.SetCount(6)
-	dp.SetTimestamp(pdata.NewTimestampFromTime(timeNow))
-	for i, key := range oneSummaryMetric.labelKeys {
-		dp.Attributes().InsertString(key, oneSummaryMetric.labelValues[i])
+	dp.SetStartTimestamp(pcommon.NewTimestampFromTime(timeNow.Add(-time.Minute)))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(timeNow))
+	for _, kv := range desc.attrs.ToSlice() {
+		dp.Attributes().InsertString(string(kv.Key), kv.Value.AsString())
 	}
 	quantile := []float64{0, 10, 50, 90, 95, 100}
 	value := []float64{1, 1, 3, 6, 6, 6}
@@ -110,6 +125,86 @@ func TestBuildSummaryMetric(t *testing.T) {
 		eachQuantile.SetValue(eachQuantileValue)
 	}
 
-	assert.Equal(t, metric, expectedMetric)
+	assert.Equal(t, expectedMetric, metric)
+}
 
+func TestBuildSummaryMetricSampled(t *testing.T) {
+	timeNow := time.Now()
+
+	type testCase struct {
+		points      []float64
+		weights     []float64
+		count       uint64
+		sum         float64
+		percentiles []float64
+		values      []float64
+	}
+
+	for _, test := range []testCase{
+		{
+			points:      []float64{1, 2, 3},
+			weights:     []float64{100, 1, 100},
+			count:       201,
+			sum:         402,
+			percentiles: []float64{0, 1, 49, 50, 51, 99, 100},
+			values:      []float64{1, 1, 1, 2, 3, 3, 3},
+		},
+		{
+			points:      []float64{1, 2},
+			weights:     []float64{99, 1},
+			count:       100,
+			sum:         101,
+			percentiles: []float64{0, 98, 99, 100},
+			values:      []float64{1, 1, 1, 2},
+		},
+		{
+			points:      []float64{0, 1, 2, 3, 4, 5},
+			weights:     []float64{1, 9, 40, 40, 5, 5},
+			count:       100,
+			sum:         254,
+			percentiles: statsDDefaultPercentiles,
+			values:      []float64{0, 1, 2, 3, 4, 5},
+		},
+	} {
+		sampledMetric := summaryMetric{
+			points:  test.points,
+			weights: test.weights,
+		}
+
+		attrs := attribute.NewSet(
+			attribute.String("mykey", "myvalue"),
+			attribute.String("mykey2", "myvalue2"),
+		)
+
+		desc := statsDMetricDescription{
+			name:       "testSummary",
+			metricType: HistogramType,
+			attrs:      attrs,
+		}
+
+		metric := pmetric.NewScopeMetrics()
+		buildSummaryMetric(desc, sampledMetric, timeNow.Add(-time.Minute), timeNow, test.percentiles, metric)
+
+		expectedMetric := pmetric.NewScopeMetrics()
+		m := expectedMetric.Metrics().AppendEmpty()
+		m.SetName("testSummary")
+		m.SetDataType(pmetric.MetricDataTypeSummary)
+		dp := m.Summary().DataPoints().AppendEmpty()
+
+		dp.SetSum(test.sum)
+		dp.SetCount(test.count)
+
+		dp.SetStartTimestamp(pcommon.NewTimestampFromTime(timeNow.Add(-time.Minute)))
+		dp.SetTimestamp(pcommon.NewTimestampFromTime(timeNow))
+		for _, kv := range desc.attrs.ToSlice() {
+			dp.Attributes().InsertString(string(kv.Key), kv.Value.AsString())
+		}
+		for i := range test.percentiles {
+			eachQuantile := dp.QuantileValues().AppendEmpty()
+			eachQuantile.SetQuantile(test.percentiles[i] / 100)
+			eachQuantile.SetValue(test.values[i])
+		}
+
+		assert.Equal(t, expectedMetric, metric)
+	}
 }

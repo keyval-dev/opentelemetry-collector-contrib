@@ -18,12 +18,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
+	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/ecsutil"
 )
 
 func TestContainerResource(t *testing.T) {
-	cm := ContainerMetadata{
+	cm := ecsutil.ContainerMetadata{
 		ContainerName: "container-1",
 		DockerID:      "001",
 		DockerName:    "docker-container-1",
@@ -34,7 +37,7 @@ func TestContainerResource(t *testing.T) {
 		KnownStatus:   "RUNNING",
 	}
 
-	r := containerResource(cm)
+	r := containerResource(cm, zap.NewNop())
 	require.NotNil(t, r)
 	attrMap := r.Attributes()
 	require.EqualValues(t, 9, attrMap.Len())
@@ -42,7 +45,7 @@ func TestContainerResource(t *testing.T) {
 		conventions.AttributeContainerName:      "container-1",
 		conventions.AttributeContainerID:        "001",
 		attributeECSDockerName:                  "docker-container-1",
-		conventions.AttributeContainerImageName: "nginx:v1.0",
+		conventions.AttributeContainerImageName: "nginx",
 		attributeContainerImageID:               "sha256:8cf1bfb43ff5d9b05af9b6b63983440f137",
 		conventions.AttributeContainerImageTag:  "v1.0",
 		attributeContainerCreatedAt:             "2020-07-30T22:12:29.837074927Z",
@@ -55,7 +58,7 @@ func TestContainerResource(t *testing.T) {
 
 func TestContainerResourceForStoppedContainer(t *testing.T) {
 	var exitCode int64 = 2
-	cm := ContainerMetadata{
+	cm := ecsutil.ContainerMetadata{
 		ContainerName: "container-1",
 		DockerID:      "001",
 		DockerName:    "docker-container-1",
@@ -68,7 +71,7 @@ func TestContainerResourceForStoppedContainer(t *testing.T) {
 		ExitCode:      &exitCode,
 	}
 
-	r := containerResource(cm)
+	r := containerResource(cm, zap.NewNop())
 	require.NotNil(t, r)
 	attrMap := r.Attributes()
 	getExitCodeAd, found := attrMap.Get(attributeContainerExitCode)
@@ -79,7 +82,7 @@ func TestContainerResourceForStoppedContainer(t *testing.T) {
 		conventions.AttributeContainerName:      "container-1",
 		conventions.AttributeContainerID:        "001",
 		attributeECSDockerName:                  "docker-container-1",
-		conventions.AttributeContainerImageName: "nginx:v1.0",
+		conventions.AttributeContainerImageName: "nginx",
 		attributeContainerImageID:               "sha256:8cf1bfb43ff5d9b05af9b6b63983440f137",
 		conventions.AttributeContainerImageTag:  "v1.0",
 		attributeContainerCreatedAt:             "2020-07-30T22:12:29.837074927Z",
@@ -92,7 +95,7 @@ func TestContainerResourceForStoppedContainer(t *testing.T) {
 }
 
 func TestTaskResource(t *testing.T) {
-	tm := TaskMetadata{
+	tm := ecsutil.TaskMetadata{
 		Cluster:          "cluster-1",
 		TaskARN:          "arn:aws:ecs:us-west-2:111122223333:task/default/158d1c8083dd49d6b527399fd6414f5c",
 		Family:           "task-def-family-1",
@@ -107,18 +110,20 @@ func TestTaskResource(t *testing.T) {
 	require.NotNil(t, r)
 
 	attrMap := r.Attributes()
-	require.EqualValues(t, 13, attrMap.Len())
+	require.EqualValues(t, 15, attrMap.Len())
 	expected := map[string]string{
 		attributeECSCluster:                        "cluster-1",
-		attributeECSTaskARN:                        "arn:aws:ecs:us-west-2:111122223333:task/default/158d1c8083dd49d6b527399fd6414f5c",
+		conventions.AttributeAWSECSTaskARN:         "arn:aws:ecs:us-west-2:111122223333:task/default/158d1c8083dd49d6b527399fd6414f5c",
 		attributeECSTaskID:                         "158d1c8083dd49d6b527399fd6414f5c",
-		attributeECSTaskFamily:                     "task-def-family-1",
+		conventions.AttributeAWSECSTaskFamily:      "task-def-family-1",
 		attributeECSTaskRevision:                   "v1.2",
+		conventions.AttributeAWSECSTaskRevision:    "v1.2",
 		conventions.AttributeCloudAvailabilityZone: "us-west-2d",
 		attributeECSTaskPullStartedAt:              "2020-10-02T00:43:06.202617438Z",
 		attributeECSTaskPullStoppedAt:              "2020-10-02T00:43:06.31288465Z",
 		attributeECSTaskKnownStatus:                "RUNNING",
 		attributeECSTaskLaunchType:                 "EC2",
+		conventions.AttributeAWSECSLaunchtype:      conventions.AttributeAWSECSLaunchtypeEC2,
 		conventions.AttributeCloudRegion:           "us-west-2",
 		conventions.AttributeCloudAccountID:        "111122223333",
 	}
@@ -127,7 +132,7 @@ func TestTaskResource(t *testing.T) {
 }
 
 func TestTaskResourceWithClusterARN(t *testing.T) {
-	tm := TaskMetadata{
+	tm := ecsutil.TaskMetadata{
 		Cluster:          "arn:aws:ecs:us-west-2:803860917211:cluster/main-cluster",
 		TaskARN:          "arn:aws:ecs:us-west-2:803860917211:cluster/main-cluster/c8083dd49d6b527399fd6414",
 		Family:           "task-def-family-1",
@@ -142,19 +147,21 @@ func TestTaskResourceWithClusterARN(t *testing.T) {
 	require.NotNil(t, r)
 
 	attrMap := r.Attributes()
-	require.EqualValues(t, 13, attrMap.Len())
+	require.EqualValues(t, 15, attrMap.Len())
 
 	expected := map[string]string{
 		attributeECSCluster:                        "main-cluster",
-		attributeECSTaskARN:                        "arn:aws:ecs:us-west-2:803860917211:cluster/main-cluster/c8083dd49d6b527399fd6414",
+		conventions.AttributeAWSECSTaskARN:         "arn:aws:ecs:us-west-2:803860917211:cluster/main-cluster/c8083dd49d6b527399fd6414",
 		attributeECSTaskID:                         "c8083dd49d6b527399fd6414",
-		attributeECSTaskFamily:                     "task-def-family-1",
+		conventions.AttributeAWSECSTaskFamily:      "task-def-family-1",
 		attributeECSTaskRevision:                   "v1.2",
+		conventions.AttributeAWSECSTaskRevision:    "v1.2",
 		conventions.AttributeCloudAvailabilityZone: "us-west-2d",
 		attributeECSTaskPullStartedAt:              "2020-10-02T00:43:06.202617438Z",
 		attributeECSTaskPullStoppedAt:              "2020-10-02T00:43:06.31288465Z",
 		attributeECSTaskKnownStatus:                "RUNNING",
 		attributeECSTaskLaunchType:                 "EC2",
+		conventions.AttributeAWSECSLaunchtype:      conventions.AttributeAWSECSLaunchtypeEC2,
 		conventions.AttributeCloudRegion:           "us-west-2",
 		conventions.AttributeCloudAccountID:        "803860917211",
 	}
@@ -162,7 +169,7 @@ func TestTaskResourceWithClusterARN(t *testing.T) {
 	verifyAttributeMap(t, expected, attrMap)
 }
 
-func verifyAttributeMap(t *testing.T, expected map[string]string, found pdata.AttributeMap) {
+func verifyAttributeMap(t *testing.T, expected map[string]string, found pcommon.Map) {
 	for key, val := range expected {
 		attributeVal, found := found.Get(key)
 		require.EqualValues(t, true, found)
@@ -184,15 +191,6 @@ func TestGetResourceFromARN(t *testing.T) {
 	require.LessOrEqual(t, 0, len(region))
 	require.LessOrEqual(t, 0, len(accountID))
 	require.LessOrEqual(t, 0, len(taskID))
-}
-
-func TestGetVersionFromImage(t *testing.T) {
-	version := getVersionFromIamge("docker-Im.age:v1.0")
-	require.EqualValues(t, "v1.0", version)
-	version = getVersionFromIamge("dockerIm-agev1.0")
-	require.EqualValues(t, "latest", version)
-	version = getVersionFromIamge("")
-	require.LessOrEqual(t, 0, len(version))
 }
 
 func TestGetNameFromCluster(t *testing.T) {

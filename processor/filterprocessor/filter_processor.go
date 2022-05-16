@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filterprocessor
+package filterprocessor // import "github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor"
 
 import (
 	"context"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/processor/processorhelper"
 	"go.uber.org/zap"
 
@@ -34,6 +35,8 @@ type filterMetricProcessor struct {
 	exclude          filtermetric.Matcher
 	excludeAttribute filtermatcher.AttributesMatcher
 	logger           *zap.Logger
+	checksMetrics    bool
+	checksResouces   bool
 }
 
 func newFilterMetricProcessor(logger *zap.Logger, cfg *Config) (*filterMetricProcessor, error) {
@@ -70,6 +73,9 @@ func newFilterMetricProcessor(logger *zap.Logger, cfg *Config) (*filterMetricPro
 		excludeResourceAttributes = cfg.Metrics.Exclude.ResourceAttributes
 	}
 
+	checksMetrics := cfg.Metrics.Exclude.ChecksMetrics() || cfg.Metrics.Include.ChecksMetrics()
+	checksResouces := cfg.Metrics.Exclude.ChecksResourceAtributes() || cfg.Metrics.Include.ChecksResourceAtributes()
+
 	logger.Info(
 		"Metric filter configured",
 		zap.String("include match_type", includeMatchType),
@@ -80,6 +86,8 @@ func newFilterMetricProcessor(logger *zap.Logger, cfg *Config) (*filterMetricPro
 		zap.Strings("exclude expressions", excludeExpressions),
 		zap.Strings("exclude metric names", excludeMetricNames),
 		zap.Any("exclude metrics with resource attributes", excludeResourceAttributes),
+		zap.Bool("checksMetrics", checksMetrics),
+		zap.Bool("checkResouces", checksResouces),
 	)
 
 	return &filterMetricProcessor{
@@ -89,6 +97,8 @@ func newFilterMetricProcessor(logger *zap.Logger, cfg *Config) (*filterMetricPro
 		exclude:          exc,
 		excludeAttribute: excludeAttr,
 		logger:           logger,
+		checksMetrics:    checksMetrics,
+		checksResouces:   checksResouces,
 	}, nil
 }
 
@@ -114,14 +124,19 @@ func createMatcher(mp *filtermetric.MatchProperties) (filtermetric.Matcher, filt
 }
 
 // processMetrics filters the given metrics based off the filterMetricProcessor's filters.
-func (fmp *filterMetricProcessor) processMetrics(_ context.Context, pdm pdata.Metrics) (pdata.Metrics, error) {
-	pdm.ResourceMetrics().RemoveIf(func(rm pdata.ResourceMetrics) bool {
+func (fmp *filterMetricProcessor) processMetrics(_ context.Context, pdm pmetric.Metrics) (pmetric.Metrics, error) {
+	pdm.ResourceMetrics().RemoveIf(func(rm pmetric.ResourceMetrics) bool {
 		keepMetricsForResource := fmp.shouldKeepMetricsForResource(rm.Resource())
 		if !keepMetricsForResource {
 			return true
 		}
-		rm.InstrumentationLibraryMetrics().RemoveIf(func(ilm pdata.InstrumentationLibraryMetrics) bool {
-			ilm.Metrics().RemoveIf(func(m pdata.Metric) bool {
+
+		if fmp.checksResouces && !fmp.checksMetrics {
+			return false
+		}
+
+		rm.ScopeMetrics().RemoveIf(func(ilm pmetric.ScopeMetrics) bool {
+			ilm.Metrics().RemoveIf(func(m pmetric.Metric) bool {
 				keep, err := fmp.shouldKeepMetric(m)
 				if err != nil {
 					fmp.logger.Error("shouldKeepMetric failed", zap.Error(err))
@@ -129,11 +144,11 @@ func (fmp *filterMetricProcessor) processMetrics(_ context.Context, pdm pdata.Me
 				}
 				return !keep
 			})
-			// Filter out empty InstrumentationLibraryMetrics
+			// Filter out empty ScopeMetrics
 			return ilm.Metrics().Len() == 0
 		})
 		// Filter out empty ResourceMetrics
-		return rm.InstrumentationLibraryMetrics().Len() == 0
+		return rm.ScopeMetrics().Len() == 0
 	})
 	if pdm.ResourceMetrics().Len() == 0 {
 		return pdm, processorhelper.ErrSkipProcessingData
@@ -141,7 +156,7 @@ func (fmp *filterMetricProcessor) processMetrics(_ context.Context, pdm pdata.Me
 	return pdm, nil
 }
 
-func (fmp *filterMetricProcessor) shouldKeepMetric(metric pdata.Metric) (bool, error) {
+func (fmp *filterMetricProcessor) shouldKeepMetric(metric pmetric.Metric) (bool, error) {
 	if fmp.include != nil {
 		matches, err := fmp.include.MatchMetric(metric)
 		if err != nil {
@@ -166,7 +181,7 @@ func (fmp *filterMetricProcessor) shouldKeepMetric(metric pdata.Metric) (bool, e
 	return true, nil
 }
 
-func (fmp *filterMetricProcessor) shouldKeepMetricsForResource(resource pdata.Resource) bool {
+func (fmp *filterMetricProcessor) shouldKeepMetricsForResource(resource pcommon.Resource) bool {
 	resourceAttributes := resource.Attributes()
 
 	if fmp.include != nil && fmp.includeAttribute != nil {

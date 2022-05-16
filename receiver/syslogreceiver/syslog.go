@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package syslogreceiver
+package syslogreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/syslogreceiver"
 
 import (
 	"github.com/open-telemetry/opentelemetry-log-collection/operator"
-	"github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/input/syslog"
-	"github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/input/tcp"
-	"github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/input/udp"
-	syslogparser "github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/parser/syslog"
+	"github.com/open-telemetry/opentelemetry-log-collection/operator/input/syslog"
+	syslogparser "github.com/open-telemetry/opentelemetry-log-collection/operator/parser/syslog"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"gopkg.in/yaml.v2"
@@ -70,19 +68,10 @@ func (f ReceiverType) DecodeInputConfig(cfg config.Receiver) (*operator.Config, 
 	logConfig := cfg.(*SysLogConfig)
 	yamlBytes, _ := yaml.Marshal(logConfig.Input)
 	inputCfg := syslog.NewSyslogInputConfig("syslog_input")
-	inputCfg.SyslogParserConfig = *syslogparser.NewSyslogParserConfig("syslog_parser")
+	inputCfg.SyslogBaseConfig = syslogparser.NewSyslogParserConfig("syslog_parser").SyslogBaseConfig
 
 	if err := yaml.Unmarshal(yamlBytes, &inputCfg); err != nil {
 		return nil, err
 	}
-
-	//
-	if inputCfg.Tcp != nil {
-		inputCfg.Tcp.InputConfig = tcp.NewTCPInputConfig("tcp_input").InputConfig
-	}
-	if inputCfg.Udp != nil {
-		inputCfg.Udp.InputConfig = udp.NewUDPInputConfig("udp_input").InputConfig
-	}
-
 	return &operator.Config{Builder: inputCfg}, nil
 }

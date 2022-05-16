@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sumologicexporter
+package sumologicexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/sumologicexporter"
 
 import (
 	"fmt"
 	"sort"
 	"strings"
 
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 )
 
 // fields represents metadata
 type fields struct {
-	orig     pdata.AttributeMap
+	orig     pcommon.Map
 	replacer *strings.Replacer
 }
 
-func newFields(attrMap pdata.AttributeMap) fields {
+func newFields(attrMap pcommon.Map) fields {
 	return fields{
 		orig:     attrMap,
 		replacer: strings.NewReplacer(",", "_", "=", ":", "\n", "_"),
@@ -38,7 +38,7 @@ func newFields(attrMap pdata.AttributeMap) fields {
 // string returns fields as ordered key=value string with `, ` as separator
 func (f fields) string() string {
 	returnValue := make([]string, 0, f.orig.Len())
-	f.orig.Range(func(k string, v pdata.AttributeValue) bool {
+	f.orig.Range(func(k string, v pcommon.Value) bool {
 		returnValue = append(
 			returnValue,
 			fmt.Sprintf(

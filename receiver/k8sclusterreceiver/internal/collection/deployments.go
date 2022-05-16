@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package collection
+package collection // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/internal/collection"
 
 import (
 	resourcepb "github.com/census-instrumentation/opencensus-proto/gen-go/resource/v1"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 	appsv1 "k8s.io/api/apps/v1"
 
 	metadata "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/experimentalmetricmetadata"
@@ -46,7 +46,6 @@ func getResourceForDeployment(dep *appsv1.Deployment) *resourcepb.Resource {
 			conventions.AttributeK8SDeploymentUID:  string(dep.UID),
 			conventions.AttributeK8SDeploymentName: dep.Name,
 			conventions.AttributeK8SNamespaceName:  dep.Namespace,
-			conventions.AttributeK8SClusterName:    dep.ClusterName,
 		},
 	}
 }

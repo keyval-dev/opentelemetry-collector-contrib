@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package zipkinv2
+package zipkinv2 // import "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/zipkin/zipkinv2"
 
 import (
 	zipkinreporter "github.com/openzipkin/zipkin-go/reporter"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
 type marshaler struct {
@@ -25,7 +25,7 @@ type marshaler struct {
 }
 
 // MarshalTraces to JSON bytes.
-func (j marshaler) MarshalTraces(td pdata.Traces) ([]byte, error) {
+func (j marshaler) MarshalTraces(td ptrace.Traces) ([]byte, error) {
 	spans, err := j.fromTranslator.FromTraces(td)
 	if err != nil {
 		return nil, err

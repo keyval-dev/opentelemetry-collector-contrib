@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package opencensusexporter
+package opencensusexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opencensusexporter"
 
 import (
 	"context"
@@ -24,7 +24,8 @@ import (
 	agenttracepb "github.com/census-instrumentation/opencensus-proto/gen-go/agent/trace/v1"
 	resourcepb "github.com/census-instrumentation/opencensus-proto/gen-go/resource/v1"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -56,9 +57,11 @@ type ocExporter struct {
 	metricsClients chan *metricsClientWithCancel
 	grpcClientConn *grpc.ClientConn
 	metadata       metadata.MD
+
+	settings component.TelemetrySettings
 }
 
-func newOcExporter(_ context.Context, cfg *Config) (*ocExporter, error) {
+func newOcExporter(_ context.Context, cfg *Config, settings component.TelemetrySettings) (*ocExporter, error) {
 	if cfg.Endpoint == "" {
 		return nil, errors.New("OpenCensus exporter cfg requires an Endpoint")
 	}
@@ -70,13 +73,14 @@ func newOcExporter(_ context.Context, cfg *Config) (*ocExporter, error) {
 	oce := &ocExporter{
 		cfg:      cfg,
 		metadata: metadata.New(cfg.GRPCClientSettings.Headers),
+		settings: settings,
 	}
 	return oce, nil
 }
 
 // start creates the gRPC client Connection
 func (oce *ocExporter) start(ctx context.Context, host component.Host) error {
-	dialOpts, err := oce.cfg.GRPCClientSettings.ToDialOptions(host)
+	dialOpts, err := oce.cfg.GRPCClientSettings.ToDialOptions(host, oce.settings)
 	if err != nil {
 		return err
 	}
@@ -129,8 +133,8 @@ func (oce *ocExporter) shutdown(context.Context) error {
 	return oce.grpcClientConn.Close()
 }
 
-func newTracesExporter(ctx context.Context, cfg *Config) (*ocExporter, error) {
-	oce, err := newOcExporter(ctx, cfg)
+func newTracesExporter(ctx context.Context, cfg *Config, settings component.TelemetrySettings) (*ocExporter, error) {
+	oce, err := newOcExporter(ctx, cfg, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +142,8 @@ func newTracesExporter(ctx context.Context, cfg *Config) (*ocExporter, error) {
 	return oce, nil
 }
 
-func newMetricsExporter(ctx context.Context, cfg *Config) (*ocExporter, error) {
-	oce, err := newOcExporter(ctx, cfg)
+func newMetricsExporter(ctx context.Context, cfg *Config, settings component.TelemetrySettings) (*ocExporter, error) {
+	oce, err := newOcExporter(ctx, cfg, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +151,7 @@ func newMetricsExporter(ctx context.Context, cfg *Config) (*ocExporter, error) {
 	return oce, nil
 }
 
-func (oce *ocExporter) pushTraces(_ context.Context, td pdata.Traces) error {
+func (oce *ocExporter) pushTraces(_ context.Context, td ptrace.Traces) error {
 	// Get first available trace Client.
 	tClient, ok := <-oce.tracesClients
 	if !ok {
@@ -196,7 +200,7 @@ func (oce *ocExporter) pushTraces(_ context.Context, td pdata.Traces) error {
 	return nil
 }
 
-func (oce *ocExporter) pushMetrics(_ context.Context, md pdata.Metrics) error {
+func (oce *ocExporter) pushMetrics(_ context.Context, md pmetric.Metrics) error {
 	// Get first available mClient.
 	mClient, ok := <-oce.metricsClients
 	if !ok {

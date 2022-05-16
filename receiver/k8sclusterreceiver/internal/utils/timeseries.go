@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package utils // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/internal/utils"
 
 import v1 "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
 
@@ -24,5 +24,16 @@ func GetInt64TimeSeriesWithLabels(val int64, labelVals []*v1.LabelValue) *v1.Tim
 	return &v1.TimeSeries{
 		LabelValues: labelVals,
 		Points:      []*v1.Point{{Value: &v1.Point_Int64Value{Int64Value: val}}},
+	}
+}
+
+func GetDoubleTimeSeries(val float64) *v1.TimeSeries {
+	return GetDoubleTimeSeriesWithLabels(val, nil)
+}
+
+func GetDoubleTimeSeriesWithLabels(val float64, labelVals []*v1.LabelValue) *v1.TimeSeries {
+	return &v1.TimeSeries{
+		LabelValues: labelVals,
+		Points:      []*v1.Point{{Value: &v1.Point_DoubleValue{DoubleValue: val}}},
 	}
 }

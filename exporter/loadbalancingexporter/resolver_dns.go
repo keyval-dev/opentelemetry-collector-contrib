@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package loadbalancingexporter
+package loadbalancingexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/loadbalancingexporter"
 
 import (
 	"context"
@@ -77,7 +77,7 @@ func newDNSResolver(logger *zap.Logger, hostname string, port string) (*dnsResol
 
 func (r *dnsResolver) start(ctx context.Context) error {
 	if _, err := r.resolve(ctx); err != nil {
-		return err
+		r.logger.Warn("failed to resolve", zap.Error(err))
 	}
 
 	go r.periodicallyResolve()

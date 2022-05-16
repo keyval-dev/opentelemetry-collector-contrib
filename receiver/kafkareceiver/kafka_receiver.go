@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kafkareceiver
+// nolint:errcheck
+package kafkareceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver"
 
 import (
 	"context"
@@ -243,6 +244,7 @@ func (c *kafkaMetricsConsumer) consumeLoop(ctx context.Context, handler sarama.C
 		}
 	}
 }
+
 func (c *kafkaMetricsConsumer) Shutdown(context.Context) error {
 	c.cancelConsumeLoop()
 	return c.consumerGroup.Close()
@@ -539,7 +541,7 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 			session.MarkMessage(message, "")
 		}
 
-		ctx := c.obsrecv.StartTracesOp(session.Context())
+		ctx := c.obsrecv.StartLogsOp(session.Context())
 		_ = stats.RecordWithTags(
 			ctx,
 			[]tag.Mutator{tag.Insert(tagInstanceName, c.id.String())},
@@ -558,7 +560,7 @@ func (c *logsConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 
 		err = c.nextConsumer.ConsumeLogs(session.Context(), logs)
 		// TODO
-		c.obsrecv.EndTracesOp(ctx, c.unmarshaler.Encoding(), logs.LogRecordCount(), err)
+		c.obsrecv.EndLogsOp(ctx, c.unmarshaler.Encoding(), logs.LogRecordCount(), err)
 		if err != nil {
 			if c.messageMarking.After && c.messageMarking.OnError {
 				session.MarkMessage(message, "")

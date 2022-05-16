@@ -12,27 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testbed
+package testbed // import "github.com/open-telemetry/opentelemetry-collector-contrib/testbed/testbed"
 
 import (
 	"context"
 	"fmt"
-	"strings"
+	"io/ioutil"
+	"os"
+	"sync"
+	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/config/mapprovider/filemapprovider"
 	"go.opentelemetry.io/collector/service"
-	"go.opentelemetry.io/collector/service/parserprovider"
 )
 
 // inProcessCollector implements the OtelcolRunner interfaces running a single otelcol as a go routine within the
 // same process as the test executor.
 type inProcessCollector struct {
-	factories component.Factories
-	configStr string
-	svc       *service.Collector
-	appDone   chan struct{}
-	stopped   bool
+	factories  component.Factories
+	configStr  string
+	svc        *service.Collector
+	stopped    bool
+	configFile string
+	wg         sync.WaitGroup
 }
 
 // NewInProcessCollector creates a new inProcessCollector using the supplied component factories.
@@ -51,44 +56,69 @@ func (ipp *inProcessCollector) PrepareConfig(configStr string) (configCleanup fu
 }
 
 func (ipp *inProcessCollector) Start(args StartParams) error {
-	settings := service.CollectorSettings{
-		BuildInfo:         component.NewDefaultBuildInfo(),
-		Factories:         ipp.factories,
-		ConfigMapProvider: parserprovider.NewInMemoryMapProvider(strings.NewReader(ipp.configStr)),
-	}
 	var err error
+
+	confFile, err := ioutil.TempFile(os.TempDir(), "conf-")
+	if err != nil {
+		return err
+	}
+
+	if _, err = confFile.Write([]byte(ipp.configStr)); err != nil {
+		os.Remove(confFile.Name())
+		return err
+	}
+	ipp.configFile = confFile.Name()
+
+	fmp := filemapprovider.New()
+	configProvider, err := service.NewConfigProvider(
+		service.ConfigProviderSettings{
+			Locations:    []string{ipp.configFile},
+			MapProviders: map[string]config.MapProvider{fmp.Scheme(): fmp},
+		})
+	if err != nil {
+		return err
+	}
+
+	settings := service.CollectorSettings{
+		BuildInfo:             component.NewDefaultBuildInfo(),
+		Factories:             ipp.factories,
+		ConfigProvider:        configProvider,
+		SkipSettingGRPCLogger: true,
+	}
+
 	ipp.svc, err = service.New(settings)
 	if err != nil {
 		return err
 	}
 
-	ipp.appDone = make(chan struct{})
+	ipp.wg.Add(1)
 	go func() {
-		defer close(ipp.appDone)
+		defer ipp.wg.Done()
 		if appErr := ipp.svc.Run(context.Background()); appErr != nil {
-			err = appErr
+			// TODO: Pass this to the error handler.
+			panic(appErr)
 		}
 	}()
 
-	for state := range ipp.svc.GetStateChannel() {
-		switch state {
+	for {
+		switch state := ipp.svc.GetState(); state {
 		case service.Starting:
-			// NoOp
+			time.Sleep(time.Second)
 		case service.Running:
-			return err
+			return nil
 		default:
-			err = fmt.Errorf("unable to start, otelcol state is %d", state)
+			return fmt.Errorf("unable to start, otelcol state is %d", state)
 		}
 	}
-	return err
 }
 
 func (ipp *inProcessCollector) Stop() (stopped bool, err error) {
 	if !ipp.stopped {
 		ipp.stopped = true
 		ipp.svc.Shutdown()
+		os.Remove(ipp.configFile)
 	}
-	<-ipp.appDone
+	ipp.wg.Wait()
 	stopped = ipp.stopped
 	return stopped, err
 }

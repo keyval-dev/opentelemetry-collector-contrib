@@ -17,7 +17,7 @@ package prometheusexecreceiver
 import (
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/config/configtest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/service/servicetest"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusexecreceiver/subprocessmanager"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver"
@@ -44,7 +44,7 @@ func loadConfigAssertNoError(t *testing.T, receiverConfigID config.ComponentID) 
 	factory := NewFactory()
 	factories.Receivers[factory.Type()] = factory
 
-	cfg, err := configtest.LoadConfigAndValidate(path.Join(".", "testdata", "config.yaml"), factories)
+	cfg, err := servicetest.LoadConfigAndValidate(filepath.Join("testdata", "config.yaml"), factories)
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
 
@@ -64,8 +64,9 @@ func assertErrorWhenExecKeyMissing(t *testing.T, errorReceiverConfig config.Rece
 	assert.Error(t, err, "newPromExecReceiver() didn't return an error")
 }
 
-// TestEndToEnd loads the test config and completes an 2e2 test where Prometheus metrics are scrapped twice from `test_prometheus_exporter.go`
+// TestEndToEnd loads the test config and completes an e2e test where Prometheus metrics are scrapped twice from `test_prometheus_exporter.go`
 func TestEndToEnd(t *testing.T) {
+	t.Skip("Flaky test, see https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/5859")
 	receiverConfig := loadConfigAssertNoError(t, config.NewComponentIDWithName(typeStr, "end_to_end_test/2"))
 
 	// e2e test with port undefined by user
@@ -73,7 +74,7 @@ func TestEndToEnd(t *testing.T) {
 }
 
 // endToEndScrapeTest creates a receiver that invokes `go run test_prometheus_exporter.go` and waits until it has scraped the /metrics endpoint twice - the application will crash between each scrape
-func endToEndScrapeTest(t *testing.T, receiverConfig config.Receiver, testName string) {
+func endToEndScrapeTest(t *testing.T, receiverConfig config.Receiver, testName string) { //nolint
 	sink := new(consumertest.MetricsSink)
 	wrapper, err := newPromExecReceiver(componenttest.NewNopReceiverCreateSettings(), receiverConfig.(*Config), sink)
 	assert.NoError(t, err, "newPromExecReceiver() returned an error")
@@ -83,10 +84,10 @@ func endToEndScrapeTest(t *testing.T, receiverConfig config.Receiver, testName s
 	assert.NoError(t, err, "Start() returned an error")
 	defer func() { assert.NoError(t, wrapper.Shutdown(ctx)) }()
 
-	var metrics []pdata.Metrics
+	var metrics []pmetric.Metrics
 
 	// Make sure two scrapes have been completed (this implies the process was started, scraped, restarted and finally scraped a second time)
-	const waitFor = 20 * time.Second
+	const waitFor = 30 * time.Second
 	const tick = 100 * time.Millisecond
 	require.Eventuallyf(t, func() bool {
 		got := sink.AllMetrics()
@@ -102,11 +103,11 @@ func endToEndScrapeTest(t *testing.T, receiverConfig config.Receiver, testName s
 
 // assertTwoUniqueValuesScraped iterates over the found metrics and returns true if it finds at least 2 unique metrics, meaning the endpoint
 // was successfully scraped twice AND the subprocess being handled was stopped and restarted
-func assertTwoUniqueValuesScraped(t *testing.T, metricsSlice []pdata.Metrics) {
+func assertTwoUniqueValuesScraped(t *testing.T, metricsSlice []pmetric.Metrics) { //nolint
 	var value float64
 	for i := range metricsSlice {
-		ms := metricsSlice[i].ResourceMetrics().At(0).InstrumentationLibraryMetrics().At(0).Metrics()
-		var tempM pdata.Metric
+		ms := metricsSlice[i].ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+		var tempM pmetric.Metric
 		ok := false
 		for j := 0; j < ms.Len(); j++ {
 			if ms.At(j).Name() == "timestamp_now" {
@@ -116,7 +117,7 @@ func assertTwoUniqueValuesScraped(t *testing.T, metricsSlice []pdata.Metrics) {
 			}
 		}
 		require.True(t, ok, "timestamp_now metric not found")
-		assert.Equal(t, pdata.MetricDataTypeGauge, tempM.DataType())
+		assert.Equal(t, pmetric.MetricDataTypeGauge, tempM.DataType())
 		tempV := tempM.Gauge().DataPoints().At(0).DoubleVal()
 		if i != 0 && tempV != value {
 			return
@@ -143,6 +144,7 @@ func TestConfigBuilderFunctions(t *testing.T) {
 			cfg: &Config{
 				ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
 				ScrapeInterval:   60 * time.Second,
+				ScrapeTimeout:    10 * time.Second,
 				Port:             9104,
 				SubprocessConfig: subprocessmanager.SubprocessConfig{
 					Command: "",
@@ -184,6 +186,7 @@ func TestConfigBuilderFunctions(t *testing.T) {
 			cfg: &Config{
 				ReceiverSettings: config.NewReceiverSettings(config.NewComponentIDWithName(typeStr, "mysqld")),
 				ScrapeInterval:   90 * time.Second,
+				ScrapeTimeout:    10 * time.Second,
 				Port:             9104,
 				SubprocessConfig: subprocessmanager.SubprocessConfig{
 					Command: "mysqld_exporter",
@@ -236,6 +239,7 @@ func TestConfigBuilderFunctions(t *testing.T) {
 			cfg: &Config{
 				ReceiverSettings: config.NewReceiverSettings(config.NewComponentIDWithName(typeStr, "postgres/test")),
 				ScrapeInterval:   60 * time.Second,
+				ScrapeTimeout:    10 * time.Second,
 				SubprocessConfig: subprocessmanager.SubprocessConfig{
 					Command: "postgres_exporter",
 					Env: []subprocessmanager.EnvConfig{
@@ -311,6 +315,7 @@ func TestFillPortPlaceholders(t *testing.T) {
 			wrapper: &prometheusExecReceiver{
 				port: 10500,
 				config: &Config{
+					ScrapeTimeout: 10 * time.Second,
 					SubprocessConfig: subprocessmanager.SubprocessConfig{
 						Command: "apache_exporter --port:{{port}}",
 						Env: []subprocessmanager.EnvConfig{
@@ -355,6 +360,7 @@ func TestFillPortPlaceholders(t *testing.T) {
 			name: "no string templating",
 			wrapper: &prometheusExecReceiver{
 				config: &Config{
+					ScrapeTimeout: 10 * time.Second,
 					SubprocessConfig: subprocessmanager.SubprocessConfig{
 						Command: "apache_exporter",
 						Env: []subprocessmanager.EnvConfig{

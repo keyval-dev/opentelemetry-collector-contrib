@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package translator
+package translator // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsxrayexporter/internal/translator"
 
 import (
 	"bytes"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	awsxray "github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/xray"
 )
 
-func makeAws(attributes map[string]pdata.AttributeValue, resource pdata.Resource) (map[string]pdata.AttributeValue, *awsxray.AWSData) {
+func makeAws(attributes map[string]pcommon.Value, resource pcommon.Resource) (map[string]pcommon.Value, *awsxray.AWSData) {
 	var (
 		cloud        string
 		service      string
@@ -56,8 +56,8 @@ func makeAws(attributes map[string]pdata.AttributeValue, resource pdata.Resource
 		taskArn      string
 		taskFamily   string
 		launchType   string
-		logGroups    pdata.AnyValueArray
-		logGroupArns pdata.AnyValueArray
+		logGroups    pcommon.Slice
+		logGroupArns pcommon.Slice
 		cwl          []awsxray.LogGroupMetadata
 		ec2          *awsxray.EC2Metadata
 		ecs          *awsxray.ECSMetadata
@@ -65,8 +65,8 @@ func makeAws(attributes map[string]pdata.AttributeValue, resource pdata.Resource
 		eks          *awsxray.EKSMetadata
 	)
 
-	filtered := make(map[string]pdata.AttributeValue)
-	resource.Attributes().Range(func(key string, value pdata.AttributeValue) bool {
+	filtered := make(map[string]pcommon.Value)
+	resource.Attributes().Range(func(key string, value pcommon.Value) bool {
 		switch key {
 		case conventions.AttributeCloudProvider:
 			cloud = value.StringVal()
@@ -117,19 +117,27 @@ func makeAws(attributes map[string]pdata.AttributeValue, resource pdata.Resource
 		case conventions.AttributeAWSECSLaunchtype:
 			launchType = value.StringVal()
 		case conventions.AttributeAWSLogGroupNames:
-			logGroups = value.ArrayVal()
+			logGroups = value.SliceVal()
 		case conventions.AttributeAWSLogGroupARNs:
-			logGroupArns = value.ArrayVal()
+			logGroupArns = value.SliceVal()
 		}
 		return true
 	})
 
+	if awsOperation, ok := attributes[awsxray.AWSOperationAttribute]; ok {
+		operation = awsOperation.StringVal()
+	} else if rpcMethod, ok := attributes[conventions.AttributeRPCMethod]; ok {
+		operation = rpcMethod.StringVal()
+	}
+
 	for key, value := range attributes {
 		switch key {
+		case conventions.AttributeRPCMethod:
+			// Determinstically handled with if else above
 		case awsxray.AWSOperationAttribute:
-			operation = value.StringVal()
+			// Determinstically handled with if else above
 		case awsxray.AWSAccountAttribute:
-			if value.Type() != pdata.AttributeValueTypeEmpty {
+			if value.Type() != pcommon.ValueTypeEmpty {
 				account = value.StringVal()
 			}
 		case awsxray.AWSRegionAttribute:
@@ -204,9 +212,9 @@ func makeAws(attributes map[string]pdata.AttributeValue, resource pdata.Resource
 
 	// Since we must couple log group ARNs and Log Group Names in the same CWLogs object, we first try to derive the
 	// names from the ARN, then fall back to just recording the names
-	if logGroupArns != (pdata.AnyValueArray{}) && logGroupArns.Len() > 0 {
+	if logGroupArns != (pcommon.Slice{}) && logGroupArns.Len() > 0 {
 		cwl = getLogGroupMetadata(logGroupArns, true)
-	} else if logGroups != (pdata.AnyValueArray{}) && logGroups.Len() > 0 {
+	} else if logGroups != (pcommon.Slice{}) && logGroups.Len() > 0 {
 		cwl = getLogGroupMetadata(logGroups, false)
 	}
 
@@ -243,7 +251,7 @@ func makeAws(attributes map[string]pdata.AttributeValue, resource pdata.Resource
 
 // Given an array of log group ARNs, create a corresponding amount of LogGroupMetadata objects with log_group and arn
 // populated, or given an array of just log group names, create the LogGroupMetadata objects with arn omitted
-func getLogGroupMetadata(logGroups pdata.AnyValueArray, isArn bool) []awsxray.LogGroupMetadata {
+func getLogGroupMetadata(logGroups pcommon.Slice, isArn bool) []awsxray.LogGroupMetadata {
 	var lgm []awsxray.LogGroupMetadata
 	for i := 0; i < logGroups.Len(); i++ {
 		if isArn {

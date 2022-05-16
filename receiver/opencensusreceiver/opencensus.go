@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package opencensusreceiver
+package opencensusreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/opencensusreceiver"
 
 import (
 	"context"
@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/opencensusreceiver/internal/ocmetrics"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/opencensusreceiver/internal/octrace"
@@ -226,7 +227,7 @@ func (ocr *ocReceiver) httpServer() *http.Server {
 func (ocr *ocReceiver) startServer(host component.Host) error {
 	// Register the grpc-gateway on the HTTP server mux
 	c := context.Background()
-	opts := []grpc.DialOption{grpc.WithInsecure()}
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	endpoint := ocr.ln.Addr().String()
 
 	_, ok := ocr.ln.(*net.UnixListener)
@@ -250,18 +251,20 @@ func (ocr *ocReceiver) startServer(host component.Host) error {
 
 	httpL := m.Match(cmux.Any())
 	go func() {
-		if errGrpc := ocr.serverGRPC.Serve(grpcL); errGrpc != nil {
-			host.ReportFatalError(errGrpc)
+		// Check for cmux.ErrServerClosed, because during the shutdown this is not properly close before closing the cmux,
+		// see TODO in Shutdown.
+		if err := ocr.serverGRPC.Serve(grpcL); !errors.Is(err, grpc.ErrServerStopped) && !errors.Is(err, cmux.ErrServerClosed) && err != nil {
+			host.ReportFatalError(err)
 		}
 	}()
 	go func() {
-		if errHTTP := ocr.httpServer().Serve(httpL); errHTTP != nil && errHTTP != http.ErrServerClosed {
-			host.ReportFatalError(errHTTP)
+		if err := ocr.httpServer().Serve(httpL); !errors.Is(err, http.ErrServerClosed) && err != nil {
+			host.ReportFatalError(err)
 		}
 	}()
 	go func() {
-		if errServe := m.Serve(); errServe != nil && errServe != cmux.ErrServerClosed {
-			host.ReportFatalError(errServe)
+		if err := m.Serve(); !errors.Is(err, cmux.ErrServerClosed) && err != nil {
+			host.ReportFatalError(err)
 		}
 	}()
 	return nil

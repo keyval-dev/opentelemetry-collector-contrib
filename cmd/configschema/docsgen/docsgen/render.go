@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package docsgen
+package docsgen // import "github.com/open-telemetry/opentelemetry-collector-contrib/cmd/configschema/docsgen/docsgen"
 
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"text/template"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/cmd/configschema"
 )
@@ -27,7 +29,7 @@ func renderHeader(typ, group, doc string) []byte {
 	return []byte(fmt.Sprintf(
 		"# %q %s Reference\n\n%s\n\n",
 		typ,
-		strings.Title(group),
+		cases.Title(language.English).String(group),
 		doc,
 	))
 }

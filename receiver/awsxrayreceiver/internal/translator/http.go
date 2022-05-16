@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package translator
+package translator // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsxrayreceiver/internal/translator"
 
 import (
-	"go.opentelemetry.io/collector/model/pdata"
-	conventions "go.opentelemetry.io/collector/model/semconv/v1.5.0"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	conventions "go.opentelemetry.io/collector/semconv/v1.6.1"
 
 	awsxray "github.com/open-telemetry/opentelemetry-collector-contrib/internal/aws/xray"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/tracetranslator"
 )
 
-func addHTTP(seg *awsxray.Segment, span *pdata.Span) {
+func addHTTP(seg *awsxray.Segment, span *ptrace.Span) {
 	if seg.HTTP == nil {
 		return
 	}
@@ -45,7 +45,7 @@ func addHTTP(seg *awsxray.Segment, span *pdata.Span) {
 
 	if resp := seg.HTTP.Response; resp != nil {
 		if resp.Status != nil {
-			otStatus := tracetranslator.StatusCodeFromHTTP(int(*resp.Status))
+			otStatus := tracetranslator.StatusCodeFromHTTP(*resp.Status)
 			// in X-Ray exporter, the segment status is set:
 			// first via the span attribute, conventions.AttributeHTTPStatusCode
 			// then the span status. Since we are also setting the span attribute

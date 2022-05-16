@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package podmanreceiver
+package podmanreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/podmanreceiver"
 
 import (
 	"errors"
+	"time"
 
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/receiver/scraperhelper"
@@ -27,7 +28,11 @@ type Config struct {
 	scraperhelper.ScraperControllerSettings `mapstructure:",squash"`
 
 	// The URL of the podman server.  Default is "unix:///run/podman/podman.sock"
-	Endpoint      string `mapstructure:"endpoint"`
+	Endpoint string `mapstructure:"endpoint"`
+
+	// The maximum amount of time to wait for Podman API responses.  Default is 5s
+	Timeout time.Duration `mapstructure:"timeout"`
+
 	APIVersion    string `mapstructure:"api_version"`
 	SSHKey        string `mapstructure:"ssh_key"`
 	SSHPassphrase string `mapstructure:"ssh_passphrase"`

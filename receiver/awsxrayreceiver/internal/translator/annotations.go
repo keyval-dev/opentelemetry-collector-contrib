@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package translator
+package translator // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsxrayreceiver/internal/translator"
 
-import (
-	"go.opentelemetry.io/collector/model/pdata"
-)
+import "go.opentelemetry.io/collector/pdata/pcommon"
 
-func addAnnotations(annos map[string]interface{}, attrs *pdata.AttributeMap) {
+func addAnnotations(annos map[string]interface{}, attrs *pcommon.Map) {
 	for k, v := range annos {
 		switch t := v.(type) {
 		case int:

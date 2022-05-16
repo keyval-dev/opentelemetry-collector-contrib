@@ -8,11 +8,11 @@ Supported pipeline types: metrics
 
 The following settings are required:
 
-- `endpoint` (no default): Where to send metric data
+- `endpoint` (no default): the address on which the Prometheus scrape handler will be run on.
 
 The following settings can be optionally configured:
 
-- `constlabels` (no default): key/values that are applied for every exported metric.
+- `const_labels` (no default): key/values that are applied for every exported metric.
 - `namespace` (no default): if set, exports metrics under the provided value.
 - `send_timestamps` (default = `false`): if true, sends the timestamp of the underlying
   metric sample in the response.

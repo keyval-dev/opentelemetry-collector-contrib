@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filestorage
+package filestorage // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage"
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/collector/config"
@@ -26,4 +30,45 @@ type Config struct {
 
 	Directory string        `mapstructure:"directory,omitempty"`
 	Timeout   time.Duration `mapstructure:"timeout,omitempty"`
+
+	Compaction *CompactionConfig `mapstructure:"compaction,omitempty"`
+}
+
+type CompactionConfig struct {
+	OnStart            bool   `mapstructure:"on_start,omitempty"`
+	Directory          string `mapstructure:"directory,omitempty"`
+	MaxTransactionSize int64  `mapstructure:"max_transaction_size,omitempty"`
+}
+
+func (cfg *Config) Validate() error {
+	var dirs []string
+	if cfg.Compaction.OnStart {
+		dirs = []string{cfg.Directory, cfg.Compaction.Directory}
+	} else {
+		dirs = []string{cfg.Directory}
+	}
+	for _, dir := range dirs {
+		info, err := os.Stat(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("directory must exist: %v", err)
+			}
+			if fsErr, ok := err.(*fs.PathError); ok {
+				return fmt.Errorf(
+					"problem accessing configured directory: %s, err: %v",
+					dir, fsErr,
+				)
+			}
+
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%s is not a directory", dir)
+		}
+	}
+
+	if cfg.Compaction.MaxTransactionSize < 0 {
+		return errors.New("max transaction size for compaction cannot be less than 0")
+	}
+
+	return nil
 }

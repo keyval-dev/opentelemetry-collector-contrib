@@ -15,11 +15,11 @@
 //go:build linux
 // +build linux
 
-package journaldreceiver
+package journaldreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/journaldreceiver"
 
 import (
 	"github.com/open-telemetry/opentelemetry-log-collection/operator"
-	"github.com/open-telemetry/opentelemetry-log-collection/operator/builtin/input/journald"
+	"github.com/open-telemetry/opentelemetry-log-collection/operator/input/journald"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"gopkg.in/yaml.v2"

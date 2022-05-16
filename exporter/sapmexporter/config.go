@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sapmexporter
+package sapmexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/sapmexporter"
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 
 	sapmclient "github.com/signalfx/sapm-proto/client"
@@ -72,6 +73,13 @@ func (c *Config) validate() error {
 		e.Scheme = defaultEndpointScheme
 	}
 	c.Endpoint = e.String()
+	return nil
+}
+
+func (c *Config) Validate() error {
+	if err := c.QueueSettings.Validate(); err != nil {
+		return fmt.Errorf("sending_queue settings has invalid configuration: %w", err)
+	}
 	return nil
 }
 

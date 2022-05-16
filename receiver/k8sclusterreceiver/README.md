@@ -33,6 +33,12 @@ array.
 by the cluster. Currently supported versions are `kubernetes` and `openshift`. Setting
 the value to `openshift` enables OpenShift specific metrics in addition to standard
 kubernetes ones.
+- `allocatable_types_to_report` (default = `[]`): An array of allocatable resource types this receiver should report.
+The following allocatable resource types are available.
+  - cpu
+  - memory
+  - ephemeral-storage
+  - storage
 
 Example:
 
@@ -40,10 +46,50 @@ Example:
   k8s_cluster:
     auth_type: kubeConfig
     node_conditions_to_report: [Ready, MemoryPressure]
+    allocatable_types_to_report: [cpu, memory]
 ```
 
 The full list of settings exposed for this receiver are documented [here](./config.go)
 with detailed sample configurations [here](./testdata/config.yaml).
+
+### Feature Gate Configurations
+- `receiver.k8sclusterreceiver.reportCpuMetricsAsDouble` 
+  - Description
+    - The k8s container and node cpu metrics being reported by the k8sclusterreceiver are transitioning from being 
+    reported as integer millicpu units to being reported as double cpu units to adhere to opentelemetry cpu metric 
+    specifications. Please update any monitoring this might affect, the change will cause cpu metrics to be double 
+    instead of integer values as well as metric values will be scaled down by 1000x. You can control whether the 
+    k8sclusterreceiver reports container and node cpu metrics in double cpu units instead of integer millicpu units 
+    with the feature gate listed below. 
+  - Affected Metrics
+    - k8s.container.cpu_request
+    - k8s.container.cpu_limit
+    - k8s.node.allocatable_cpu
+  - Stages and Timeline
+    - Alpha
+      - In this stage the feature gate is disabled by default and must be enabled by the user. This allows users to preemptively opt in and start using the bug fix by enabling the feature gate.
+      - Collector version: v0.47.0
+      - Release Date: Late March 2022
+    - Beta (current stage)
+      - In this stage the feature gate is enabled by default and can be disabled by the user.
+      - Users could experience some friction in this stage, they may need to update monitoring for the affected metrics or opt out of using the bug fix by disabling the feature gate.
+      - Target Collector version: v0.50.0
+      - Target Release Date: Early May 2022
+    - Generally Available
+      - In this stage the feature gate is permanently enabled and the feature gate is no longer available for anyone.
+      - Users could experience some friction in this stage, they may have to update monitoring for the affected metrics or be blocked from upgrading the collector to versions v0.53.0 and newer.
+      - Target Collector version: v0.53.0
+      - Target Release Date: Mid June 2022
+  - Usage
+    - Feature gate identifiers prefixed with - will disable the gate and prefixing with + or with no prefix will enable the gate.
+    - Start the otelcol with the feature gate enabled:
+      - otelcol {other_arguments} --feature-gates=receiver.k8sclusterreceiver.reportCpuMetricsAsDouble 
+    - Start the otelcol with the feature gate disabled:
+      - otelcol {other_arguments} --feature-gates=-receiver.k8sclusterreceiver.reportCpuMetricsAsDouble
+  - More Information
+    - [collector.go where the the feature gate is registered](./internal/collection/collector.go)
+    - https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/8115
+    - https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/semantic_conventions/system-metrics.md#systemcpu---processor-metrics
 
 ### node_conditions_to_report
 
@@ -148,7 +194,7 @@ Use the below commands to create a `ClusterRole` with required permissions and a
 
 ```bash
 <<EOF | kubectl apply -f -
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: otelcontribcol
@@ -216,7 +262,7 @@ EOF
 
 ```bash
 <<EOF | kubectl apply -f -
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: otelcontribcol

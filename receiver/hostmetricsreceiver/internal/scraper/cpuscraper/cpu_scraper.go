@@ -12,36 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cpuscraper
+package cpuscraper // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/cpuscraper"
 
 import (
 	"context"
 	"time"
 
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/host"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/host"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver/scrapererror"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/cpuscraper/internal/metadata"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/cpuscraper/ucal"
 )
 
-const metricsLen = 1
+const metricsLen = 2
 
 // scraper for CPU Metrics
 type scraper struct {
-	config    *Config
-	startTime pdata.Timestamp
+	config *Config
+	mb     *metadata.MetricsBuilder
+	ucal   *ucal.CPUUtilizationCalculator
 
 	// for mocking
 	bootTime func() (uint64, error)
 	times    func(bool) ([]cpu.TimesStat, error)
+	now      func() time.Time
 }
 
 // newCPUScraper creates a set of CPU related metrics
 func newCPUScraper(_ context.Context, cfg *Config) *scraper {
-	return &scraper{config: cfg, bootTime: host.BootTime, times: cpu.Times}
+	return &scraper{config: cfg, bootTime: host.BootTime, times: cpu.Times, ucal: &ucal.CPUUtilizationCalculator{}, now: time.Now}
 }
 
 func (s *scraper) start(context.Context, component.Host) error {
@@ -49,46 +53,25 @@ func (s *scraper) start(context.Context, component.Host) error {
 	if err != nil {
 		return err
 	}
-
-	s.startTime = pdata.Timestamp(bootTime * 1e9)
+	s.mb = metadata.NewMetricsBuilder(s.config.Metrics, metadata.WithStartTime(pcommon.Timestamp(bootTime*1e9)))
 	return nil
 }
 
-func (s *scraper) scrape(_ context.Context) (pdata.Metrics, error) {
-	md := pdata.NewMetrics()
-	metrics := md.ResourceMetrics().AppendEmpty().InstrumentationLibraryMetrics().AppendEmpty().Metrics()
-
-	now := pdata.NewTimestampFromTime(time.Now())
+func (s *scraper) scrape(_ context.Context) (pmetric.Metrics, error) {
+	now := pcommon.NewTimestampFromTime(s.now())
 	cpuTimes, err := s.times( /*percpu=*/ true)
 	if err != nil {
-		return md, scrapererror.NewPartialScrapeError(err, metricsLen)
+		return pmetric.NewMetrics(), scrapererror.NewPartialScrapeError(err, metricsLen)
 	}
 
-	initializeCPUTimeMetric(metrics.AppendEmpty(), s.startTime, now, cpuTimes)
-	return md, nil
-}
-
-func initializeCPUTimeMetric(metric pdata.Metric, startTime, now pdata.Timestamp, cpuTimes []cpu.TimesStat) {
-	metadata.Metrics.SystemCPUTime.Init(metric)
-
-	ddps := metric.Sum().DataPoints()
-	ddps.EnsureCapacity(len(cpuTimes) * cpuStatesLen)
 	for _, cpuTime := range cpuTimes {
-		appendCPUTimeStateDataPoints(ddps, startTime, now, cpuTime)
+		s.recordCPUTimeStateDataPoints(now, cpuTime)
 	}
-}
 
-const gopsCPUTotal string = "cpu-total"
-
-func initializeCPUTimeDataPoint(dataPoint pdata.NumberDataPoint, startTime, now pdata.Timestamp, cpuLabel string, stateLabel string, value float64) {
-	attributes := dataPoint.Attributes()
-	// ignore cpu attribute if reporting "total" cpu usage
-	if cpuLabel != gopsCPUTotal {
-		attributes.InsertString(metadata.Labels.Cpu, cpuLabel)
+	err = s.ucal.CalculateAndRecord(now, cpuTimes, s.recordCPUUtilization)
+	if err != nil {
+		return pmetric.NewMetrics(), scrapererror.NewPartialScrapeError(err, metricsLen)
 	}
-	attributes.InsertString(metadata.Labels.State, stateLabel)
 
-	dataPoint.SetStartTimestamp(startTime)
-	dataPoint.SetTimestamp(now)
-	dataPoint.SetDoubleVal(value)
+	return s.mb.Emit(), nil
 }

@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package filestorage
+package filestorage // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage"
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -28,24 +27,24 @@ import (
 )
 
 type localFileStorage struct {
-	directory string
-	timeout   time.Duration
-	logger    *zap.Logger
+	directory           string
+	timeout             time.Duration
+	logger              *zap.Logger
+	compactionDirectory string
+	compactOnStart      bool
+	maxCompactionSize   int64
 }
 
 // Ensure this storage extension implements the appropriate interface
 var _ storage.Extension = (*localFileStorage)(nil)
 
 func newLocalFileStorage(logger *zap.Logger, config *Config) (component.Extension, error) {
-	info, err := os.Stat(config.Directory)
-	if (err != nil && os.IsNotExist(err)) || !info.IsDir() {
-		return nil, fmt.Errorf("directory must exist: %v", err)
-	}
-
 	return &localFileStorage{
-		directory: filepath.Clean(config.Directory),
-		timeout:   config.Timeout,
-		logger:    logger,
+		directory:           filepath.Clean(config.Directory),
+		compactionDirectory: filepath.Clean(config.Compaction.Directory),
+		compactOnStart:      config.Compaction.OnStart,
+		timeout:             config.Timeout,
+		logger:              logger,
 	}, nil
 }
 
@@ -71,7 +70,15 @@ func (lfs *localFileStorage) GetClient(ctx context.Context, kind component.Kind,
 	}
 	// TODO sanitize rawName
 	absoluteName := filepath.Join(lfs.directory, rawName)
-	return newClient(absoluteName, lfs.timeout)
+	client, err := newClient(absoluteName, lfs.timeout)
+
+	// return if compaction is not required
+	if err != nil || !lfs.compactOnStart {
+		return client, err
+	}
+
+	// perform compaction and returns client
+	return client.Compact(ctx, lfs.compactionDirectory, lfs.timeout, lfs.maxCompactionSize)
 }
 
 func kindString(k component.Kind) string {

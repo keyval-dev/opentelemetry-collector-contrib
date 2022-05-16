@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pagingscraper
+package pagingscraper // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver/internal/scraper/pagingscraper"
 
 type pageFileStats struct {
 	deviceName  string // Optional
 	usedBytes   uint64
 	freeBytes   uint64
+	totalBytes  uint64
 	cachedBytes *uint64 // Optional
 }
