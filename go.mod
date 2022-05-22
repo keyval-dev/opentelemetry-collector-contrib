@@ -75,6 +75,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/routingprocessor v0.51.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanmetricsprocessor v0.51.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanprocessor v0.51.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/processor/ipresolverprocessor v0.51.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor v0.51.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/receiver/activedirectorydsreceiver v0.51.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/receiver/apachereceiver v0.51.0
@@ -726,6 +727,8 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/tail
 replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor => ./processor/transformprocessor
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/schemaprocessor => ./processor/schemaprocessor
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/ipresolverprocessor => ./processor/ipresolverprocessor
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/receiver/activedirectorydsreceiver => ./receiver/activedirectorydsreceiver
 
