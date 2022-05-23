@@ -38,7 +38,7 @@ func (ir *ipResolverProcessor) processTraces(_ context.Context, td ptrace.Traces
 					if ip != nil {
 						hosts, err := net.LookupAddr(ip.String())
 						if err != nil {
-							ir.logger.Error("could not find hostname for net.host.ip", zap.Error(err))
+							ir.logger.Error("could not find hostname for net.host.ip", zap.Error(err), zap.String("ip", ip.String()))
 						} else if len(hosts) > 0 {
 							if netPeerNameExists {
 								span.Attributes().UpdateString(string(semconv.NetPeerNameKey), hosts[0])
