@@ -23,7 +23,7 @@ import (
 	awsemfexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsemfexporter"
 	awskinesisexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awskinesisexporter"
 	awsxrayexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsxrayexporter"
-	azuredataexplorerexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuredataexplorerexporter"
+	azureblobstorageexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azureblobstorageexporter"
 	azuremonitorexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuremonitorexporter"
 	carbonexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/carbonexporter"
 	clickhouseexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter"
@@ -35,6 +35,7 @@ import (
 	fileexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter"
 	googlecloudexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudexporter"
 	googlecloudpubsubexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudpubsubexporter"
+	googlecloudstorageexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudstorageexporter"
 	googlemanagedprometheusexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlemanagedprometheusexporter"
 	influxdbexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/influxdbexporter"
 	instanaexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/instanaexporter"
@@ -287,7 +288,6 @@ func components() (otelcol.Factories, error) {
 		awsemfexporter.NewFactory(),
 		awskinesisexporter.NewFactory(),
 		awsxrayexporter.NewFactory(),
-		azuredataexplorerexporter.NewFactory(),
 		azuremonitorexporter.NewFactory(),
 		carbonexporter.NewFactory(),
 		clickhouseexporter.NewFactory(),
@@ -299,6 +299,8 @@ func components() (otelcol.Factories, error) {
 		fileexporter.NewFactory(),
 		googlecloudexporter.NewFactory(),
 		googlecloudpubsubexporter.NewFactory(),
+		googlecloudstorageexporter.NewFactory(),
+		azureblobstorageexporter.NewFactory(),
 		googlemanagedprometheusexporter.NewFactory(),
 		influxdbexporter.NewFactory(),
 		instanaexporter.NewFactory(),

@@ -210,6 +210,20 @@ docker-component: check-component
 	docker build -t $(COMPONENT) ./cmd/$(COMPONENT)/
 	rm ./cmd/$(COMPONENT)/$(COMPONENT)
 
+.PHONY: docker-component-arm64 # Not intended to be used directly
+docker-component-arm64: check-component
+	GOOS=linux GOARCH=arm64 $(MAKE) $(COMPONENT)
+	cp ./bin/$(COMPONENT)_linux_arm64 ./cmd/$(COMPONENT)/$(COMPONENT)
+	docker build -t $(DOCKER_IMAGE) ./cmd/$(COMPONENT)/
+	rm ./cmd/$(COMPONENT)/$(COMPONENT)
+
+.PHONY: docker-component-amd64 # Not intended to be used directly
+docker-component-amd64: check-component
+	GOOS=linux GOARCH=amd64 $(MAKE) $(COMPONENT)
+	cp ./bin/$(COMPONENT)_linux_amd64 ./cmd/$(COMPONENT)/$(COMPONENT)
+	docker buildx build -t $(DOCKER_IMAGE) ./cmd/$(COMPONENT)/ --platform linux/amd64
+	rm ./cmd/$(COMPONENT)/$(COMPONENT)
+
 .PHONY: check-component
 check-component:
 ifndef COMPONENT
@@ -219,6 +233,14 @@ endif
 .PHONY: docker-otelcontribcol
 docker-otelcontribcol:
 	COMPONENT=otelcontribcol $(MAKE) docker-component
+
+.PHONY: docker-arm64
+docker-arm64:
+	COMPONENT=otelcontribcol $(MAKE) docker-component-arm64
+
+.PHONY: docker-amd64
+docker-amd64:
+	COMPONENT=otelcontribcol $(MAKE) docker-component-amd64
 
 .PHONY: generate
 generate:
