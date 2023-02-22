@@ -874,6 +874,8 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/tran
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/schemaprocessor => ./processor/schemaprocessor
 
+replace github.com/open-telemetry/opentelemetry-collector-contrib/processor/odigosresourcenameprocessor => ./processor/odigosresourcenameprocessor
+
 replace github.com/open-telemetry/opentelemetry-collector-contrib/receiver/activedirectorydsreceiver => ./receiver/activedirectorydsreceiver
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/receiver/aerospikereceiver => ./receiver/aerospikereceiver
