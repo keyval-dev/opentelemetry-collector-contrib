@@ -6,7 +6,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	podresourcesapi "k8s.io/kubelet/pkg/apis/podresources/v1alpha1"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -16,21 +15,22 @@ var (
 	socketPath = "unix://" + socketDir + "/kubelet.sock"
 
 	connectionTimeout = 10 * time.Second
-	ownerRegex        = regexp.MustCompile(`(?P<deployment_name>[a-z0-9]+(?:-[a-z0-9]+)*?)-[a-f0-9]{10}-[a-z0-9]+`)
 )
 
 type kubeletClient struct {
-	conn *grpc.ClientConn
+	conn         *grpc.ClientConn
+	nameStrategy NameStrategy
 }
 
-func NewKubeletClient() (*kubeletClient, error) {
+func NewKubeletClient(ns NameStrategy) (*kubeletClient, error) {
 	conn, err := connectToKubelet(socketPath)
 	if err != nil {
 		return nil, err
 	}
 
 	return &kubeletClient{
-		conn: conn,
+		conn:         conn,
+		nameStrategy: ns,
 	}, nil
 }
 
@@ -52,7 +52,12 @@ func (c *kubeletClient) GetAllocations() (map[string]string, error) {
 			for _, device := range container.Devices {
 				for _, id := range device.DeviceIds {
 					if strings.Contains(device.GetResourceName(), "odigos.io") {
-						allocations[id] = calculateResourceName(pod.Name, len(pod.Containers), container.Name)
+						allocations[id] = c.nameStrategy.GetName(&ContainerDetails{
+							PodName:         pod.Name,
+							PodNamespace:    pod.Namespace,
+							ContainerName:   container.Name,
+							ContainersInPod: len(pod.Containers),
+						})
 					}
 				}
 			}
@@ -60,19 +65,6 @@ func (c *kubeletClient) GetAllocations() (map[string]string, error) {
 	}
 
 	return allocations, nil
-}
-
-func calculateResourceName(podName string, containers int, containerName string) string {
-	if containers > 1 {
-		return containerName
-	}
-
-	match := ownerRegex.FindStringSubmatch(podName)
-	if len(match) > 1 {
-		return match[1]
-	}
-
-	return podName
 }
 
 func connectToKubelet(socket string) (*grpc.ClientConn, error) {

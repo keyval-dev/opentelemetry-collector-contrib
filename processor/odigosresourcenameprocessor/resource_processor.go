@@ -50,7 +50,6 @@ func (rp *resourceProcessor) processAttributes(ctx context.Context, logger *zap.
 		}
 
 		// Replace resource name
-		logger.Info("Replacing resource name", zap.String("name", string(name)))
 		resourceName.SetStr(string(name))
 		return
 	}

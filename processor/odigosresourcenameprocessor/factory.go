@@ -122,7 +122,12 @@ func initNameResolver(cfg component.Config, logger *zap.Logger) error {
 		return err
 	}
 
-	kubelet, err := NewKubeletClient()
+	ns := &NameFromOwner{
+		kc:     kubeClient,
+		logger: logger,
+	}
+
+	kubelet, err := NewKubeletClient(ns)
 	if err != nil {
 		return err
 	}
