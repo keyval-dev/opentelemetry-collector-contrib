@@ -716,6 +716,8 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googl
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azureblobstorageexporter => ./exporter/azureblobstorageexporter
 
+replace github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awss3exporter => ./exporter/awss3exporter
+
 replace github.com/open-telemetry/opentelemetry-collector-contrib/exporter/influxdbexporter => ./exporter/influxdbexporter
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/exporter/instanaexporter => ./exporter/instanaexporter

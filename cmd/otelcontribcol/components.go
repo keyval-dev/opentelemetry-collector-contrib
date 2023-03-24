@@ -22,6 +22,7 @@ import (
 	awscloudwatchlogsexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter"
 	awsemfexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsemfexporter"
 	awskinesisexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awskinesisexporter"
+	awss3exporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awss3exporter"
 	awsxrayexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsxrayexporter"
 	azureblobstorageexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azureblobstorageexporter"
 	azuremonitorexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuremonitorexporter"
@@ -302,6 +303,7 @@ func components() (otelcol.Factories, error) {
 		googlecloudpubsubexporter.NewFactory(),
 		googlecloudstorageexporter.NewFactory(),
 		azureblobstorageexporter.NewFactory(),
+		awss3exporter.NewFactory(),
 		googlemanagedprometheusexporter.NewFactory(),
 		influxdbexporter.NewFactory(),
 		instanaexporter.NewFactory(),
