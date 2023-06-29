@@ -1,16 +1,11 @@
 package odigosresourcenameprocessor
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"go.uber.org/zap"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"os"
 	"sync"
+	"time"
 )
 
 const (
@@ -27,15 +22,28 @@ type NameResolver struct {
 	kubelet       *kubeletClient
 	mu            sync.RWMutex
 	devicesToPods map[string]string
+	shutdown      chan struct{}
 }
 
 func (n *NameResolver) Resolve(deviceID string) (string, error) {
 	n.mu.RLock()
-	defer n.mu.RUnlock()
-
 	name, ok := n.devicesToPods[deviceID]
+	n.mu.RUnlock()
+
 	if !ok {
-		return "", ErrNoDeviceFound
+		err := n.updateDevicesToPods()
+		if err != nil {
+			n.logger.Error("Error updating devices to pods", zap.Error(err))
+			return "", err
+		}
+
+		n.mu.RLock()
+		name, ok = n.devicesToPods[deviceID]
+		n.mu.RUnlock()
+
+		if !ok {
+			return "", ErrNoDeviceFound
+		}
 	}
 
 	return name, nil
@@ -56,29 +64,27 @@ func (n *NameResolver) updateDevicesToPods() error {
 
 func (n *NameResolver) Start() error {
 	n.logger.Info("Starting NameResolver ...")
-	nn, ok := os.LookupEnv(nodeNameEnvVar)
-	if !ok {
-		return fmt.Errorf("env var %s is not set", nodeNameEnvVar)
-	}
-
-	w, err := n.kc.CoreV1().Pods("").Watch(context.Background(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nn),
-	})
-	if err != nil {
-		n.logger.Error("Error watching pods", zap.Error(err))
-		return err
-	}
-
 	go func() {
-		for event := range w.ResultChan() {
-			pod := event.Object.(*corev1.Pod)
-			if event.Type == watch.Modified && pod.Status.Phase == corev1.PodRunning {
-				if err := n.updateDevicesToPods(); err != nil {
+		// Refresh devices to pods every 5 seconds
+		ticker := time.NewTicker(5 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				err := n.updateDevicesToPods()
+				if err != nil {
 					n.logger.Error("Error updating devices to pods", zap.Error(err))
 				}
+			case <-n.shutdown:
+				ticker.Stop()
+				return
 			}
 		}
 	}()
 
 	return nil
+}
+
+func (n *NameResolver) Shutdown() {
+	n.logger.Info("Shutting down NameResolver ...")
+	close(n.shutdown)
 }

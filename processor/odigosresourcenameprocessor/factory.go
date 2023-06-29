@@ -68,7 +68,8 @@ func createTracesProcessor(
 		cfg,
 		nextConsumer,
 		proc.processTraces,
-		processorhelper.WithCapabilities(processorCapabilities))
+		processorhelper.WithCapabilities(processorCapabilities),
+		processorhelper.WithShutdown(proc.Shutdown))
 }
 
 func createMetricsProcessor(
@@ -88,7 +89,8 @@ func createMetricsProcessor(
 		cfg,
 		nextConsumer,
 		proc.processMetrics,
-		processorhelper.WithCapabilities(processorCapabilities))
+		processorhelper.WithCapabilities(processorCapabilities),
+		processorhelper.WithShutdown(proc.Shutdown))
 }
 
 func createLogsProcessor(
@@ -108,7 +110,8 @@ func createLogsProcessor(
 		cfg,
 		nextConsumer,
 		proc.processLogs,
-		processorhelper.WithCapabilities(processorCapabilities))
+		processorhelper.WithCapabilities(processorCapabilities),
+		processorhelper.WithShutdown(proc.Shutdown))
 }
 
 func initNameResolver(cfg component.Config, logger *zap.Logger) error {
@@ -133,11 +136,12 @@ func initNameResolver(cfg component.Config, logger *zap.Logger) error {
 	}
 
 	nameResolver = &NameResolver{
-		kc:            kubeClient,
 		logger:        logger,
 		devicesToPods: map[string]string{},
 		mu:            sync.RWMutex{},
 		kubelet:       kubelet,
+		shutdown:      make(chan struct{}),
 	}
+
 	return nameResolver.Start()
 }

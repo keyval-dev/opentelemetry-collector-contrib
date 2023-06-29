@@ -78,3 +78,8 @@ func (rp *resourceProcessor) processLogs(ctx context.Context, ld plog.Logs) (plo
 	}
 	return ld, nil
 }
+
+func (rp *resourceProcessor) Shutdown(ctx context.Context) error {
+	rp.nameResolver.Shutdown()
+	return nil
+}
